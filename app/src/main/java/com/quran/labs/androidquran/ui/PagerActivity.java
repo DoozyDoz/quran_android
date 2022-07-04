@@ -1,5 +1,7 @@
 package com.quran.labs.androidquran.ui;
 
+import static com.quran.labs.androidquran.database.DatabaseUtils.closeCursor;
+import static com.quran.labs.androidquran.database.SuraTimingDatabaseHandler.getDatabaseHandler;
 import static com.quran.labs.androidquran.ui.helpers.SlidingPagerAdapter.AUDIO_PAGE;
 import static com.quran.labs.androidquran.ui.helpers.SlidingPagerAdapter.TAG_PAGE;
 import static com.quran.labs.androidquran.ui.helpers.SlidingPagerAdapter.TRANSLATION_PAGE;
@@ -15,6 +17,8 @@ import android.content.SharedPreferences;
 import android.content.pm.ActivityInfo;
 import android.content.res.Configuration;
 import android.content.res.Resources;
+import android.database.Cursor;
+import android.database.SQLException;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.Environment;
@@ -23,6 +27,7 @@ import android.os.Message;
 import android.preference.PreferenceManager;
 import android.text.TextUtils;
 import android.util.SparseBooleanArray;
+import android.util.SparseIntArray;
 import android.view.HapticFeedbackConstants;
 import android.view.KeyEvent;
 import android.view.Menu;
@@ -76,6 +81,8 @@ import com.quran.labs.androidquran.dao.audio.AudioRequest;
 import com.quran.labs.androidquran.data.Constants;
 import com.quran.labs.androidquran.data.QuranDataProvider;
 import com.quran.labs.androidquran.data.QuranDisplayData;
+import com.quran.labs.androidquran.database.DatabaseUtils;
+import com.quran.labs.androidquran.database.SuraTimingDatabaseHandler;
 import com.quran.labs.androidquran.database.TranslationsDBAdapter;
 import com.quran.labs.androidquran.di.component.activity.PagerActivityComponent;
 import com.quran.labs.androidquran.di.module.activity.PagerActivityModule;
@@ -113,6 +120,7 @@ import com.quran.labs.androidquran.util.QuranScreenInfo;
 import com.quran.labs.androidquran.util.QuranSettings;
 import com.quran.labs.androidquran.util.QuranUtils;
 import com.quran.labs.androidquran.util.ShareUtil;
+import com.quran.labs.androidquran.util.soundfile.SoundFile;
 import com.quran.labs.androidquran.view.AudioStatusBar;
 import com.quran.labs.androidquran.view.IconPageIndicator;
 import com.quran.labs.androidquran.view.QuranSpinner;
@@ -127,13 +135,16 @@ import com.quran.reading.common.AudioEventPresenter;
 import com.quran.reading.common.ReadingEventPresenter;
 
 import java.io.File;
+import java.io.IOException;
 import java.lang.ref.WeakReference;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.Callable;
 import java.util.concurrent.TimeUnit;
 
 import javax.inject.Inject;
@@ -143,6 +154,8 @@ import io.reactivex.rxjava3.core.Completable;
 import io.reactivex.rxjava3.core.Observable;
 import io.reactivex.rxjava3.core.Single;
 import io.reactivex.rxjava3.disposables.CompositeDisposable;
+import io.reactivex.rxjava3.disposables.Disposable;
+import io.reactivex.rxjava3.functions.BiConsumer;
 import io.reactivex.rxjava3.observers.DisposableObserver;
 import io.reactivex.rxjava3.observers.DisposableSingleObserver;
 import io.reactivex.rxjava3.schedulers.Schedulers;
@@ -256,6 +269,11 @@ public class PagerActivity extends AppCompatActivity implements
   private final CompositeDisposable foregroundDisposable = new CompositeDisposable();
 
   private final PagerHandler handler = new PagerHandler(this);
+
+  private Disposable timingDisposable;
+  private int            gaplessSura;
+  private SparseIntArray gaplessSuraData = new SparseIntArray();
+
 
   private static class PagerHandler extends Handler {
     private final WeakReference<PagerActivity> activity;
@@ -1862,92 +1880,142 @@ public class PagerActivity extends AppCompatActivity implements
         audioPathInfo.getLocalDirectory(), start, end, audioPathInfo.getGaplessDatabase() != null);
   }
 
-  public void shareAyahAudio(SuraAyah start, SuraAyah end) {
-    if (start == null || end == null) {
-      return;
-    } else if (!quranFileUtils.hasArabicSearchDatabase()) {
-      showGetRequiredFilesDialog();
-      return;
+  private void updateGaplessData(String databasePath,int sura) {
+    Disposable disposable = this.timingDisposable;
+    if (disposable != null) {
+      disposable.dispose();
     }
 
-//    final LocalTranslation[] translationNames = lastActivatedLocalTranslations;
-//    if (showingTranslation && translationNames != null) {
+    this.timingDisposable = Single.fromCallable(new Callable() {
+      public final SparseIntArray call() {
+        SuraTimingDatabaseHandler db     = SuraTimingDatabaseHandler.Companion.getDatabaseHandler(databasePath);
+        SparseIntArray            map    = new SparseIntArray();
+        Cursor                    cursor = null;
 
-      // temporarily required so "lastSelectedTranslationAyah" isn't null
-      // the real solution is to move this sharing logic out of PagerActivity
-      // in the future and avoid this back and forth with the translation fragment.
-//      updateLocalTranslations(start);
-//      final QuranAyahInfo quranAyahInfo = lastSelectedTranslationAyah;
-//      if (quranAyahInfo != null) {
-        String newPath = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MUSIC).getPath() +
-            File.separator +"quran_android";
-
-        File dir = new File(newPath);
-        if (!dir.exists()) {
-          if (!dir.mkdirs()){
-            Toast.makeText(this, "could not create directory", Toast.LENGTH_SHORT).show();
+        try {
+          cursor = db.getAyahTimings(sura);
+          Timber.Forest.d("got cursor of data", new Object[0]);
+          if (cursor != null && cursor.moveToFirst()) {
+            do {
+              int ayah = cursor.getInt(1);
+              int time = cursor.getInt(2);
+              map.put(ayah, time);
+            } while (cursor.moveToNext());
           }
+        } catch (SQLException sqlException) {
+          Timber.Forest.e(sqlException);
+        } finally {
+          DatabaseUtils.closeCursor(cursor);
         }
+        return map;
+      }
+    }).subscribeOn(Schedulers.io()).observeOn(AndroidSchedulers.mainThread()).subscribe(new BiConsumer() {
+      public void accept(Object obj, Object throwable) {
+        this.accept((SparseIntArray) obj, (Throwable) throwable);
+      }
 
-        File         destFile = new File(dir.getPath() + File.separator + UUID.randomUUID().toString() + ".mp3");
-        final QariItem qari = audioStatusBar.getAudioInfo();
-        AudioPathInfo audioPathInfo = getLocalAudioPathInfo(qari);
-        if (audioPathInfo != null) {
-          final boolean shouldStream = quranSettings.shouldStream();
-          boolean stream = shouldStream && !haveAllFiles(audioPathInfo, start, end);
+      public final void accept(SparseIntArray map, Throwable throwable) {
+        PagerActivity.this.gaplessSura = sura;
+        PagerActivity pagerActivity = PagerActivity.this;
+        Intrinsics.checkNotNullExpressionValue(map, "map");
+        pagerActivity.gaplessSuraData = map;
+      }
+    });
+  }
 
-          AudioPathInfo audioPath = stream? audioPathInfo.copy(audioUtils.getQariUrl(qari),null,null):audioPathInfo;
+  public void shareAyahAudio(SuraAyah start, SuraAyah end) {
+    SuraAyah    actualStart,actualEnd;
+    if (start == null || end == null) {
+      return;
+    }else {
+      //get actual end and start
+      kotlin.Pair pair;
+      if (start.compareTo(end) <= 0) {
+        pair = TuplesKt.to(start, end);
+      } else {
+        Timber.Forest.e(new IllegalStateException("End isn't larger than the start: " + start + " to " + end));
+        pair = TuplesKt.to(end, start);
+      }
 
-          kotlin.Pair pair;
-          if (start.compareTo(end) <= 0) {
-            pair = TuplesKt.to(start, end);
-          } else {
-            Timber.Forest.e(new IllegalStateException("End isn't larger than the start: " + start + " to " + end));
-            pair = TuplesKt.to(end, start);
-          }
+      kotlin.Pair pair2       = pair;
+      actualStart = (SuraAyah)pair2.component1();
+      actualEnd = (SuraAyah)pair2.component2();
+    }
 
-          kotlin.Pair pair2       = pair;
-          SuraAyah    actualStart = (SuraAyah)pair2.component1();
-          SuraAyah actualEnd = (SuraAyah)pair2.component2();
-          AudioRequest audioRequest = new AudioRequest(
-              actualStart, actualEnd, qari, 0, 0, true, stream, audioPath);
-          try {
-            new AudioCutter().genVideoUsingMuxer(
-                audioPath.getLocalDirectory(),
-                destFile.getPath(),
-                -1,
-                -1,
-                true,
-                false
-            );
-          } catch (Exception e) {
+    //get audio info
+    final QariItem qari = audioStatusBar.getAudioInfo();
+    AudioPathInfo audioPathInfo = getLocalAudioPathInfo(qari);
 
-          }
+    //get audio path
+    String audioStartPath = String.format(Locale.US, audioPathInfo.getLocalDirectory(), actualStart.sura);
+    String audioEndPath = String.format(Locale.US, audioPathInfo.getLocalDirectory(), actualEnd.sura);
+
+    if (audioPathInfo.getGaplessDatabase() != null) {
+      this.updateGaplessData(audioPathInfo.getGaplessDatabase(), actualStart.sura);
+      int ayah1 = actualStart.ayah;
+      int ayah2 = actualEnd.ayah;
+      int startPosition = ayah1 == 1?gaplessSuraData.get(0):gaplessSuraData.get(ayah1);
+      int endPosition = ayah2 == 1?gaplessSuraData.get(0):gaplessSuraData.get(ayah2);
+      float startTime = startPosition/1000;
+      float endTime = endPosition/1000;
+
+      String newPath = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MUSIC).getPath() +
+          File.separator +"quran_android_cache";
+
+      File dir = new File(newPath);
+      if (!dir.exists()) {
+        if (!dir.mkdirs()){
+          Toast.makeText(this, "could not create directory", Toast.LENGTH_SHORT).show();
         }
+      }
 
-//        final String shareText = shareUtil.getShareText(this, quranAyahInfo, translationNames);
-//        if (isCopy) {
-//          shareUtil.copyToClipboard(this, shareText);
-//        } else {
-//          shareUtil.shareViaIntent(this, shareText, com.quran.labs.androidquran.common.toolbar.R.string.share_ayah_text);
+      String tempAudioName = UUID.randomUUID().toString() + ".m4a";
+      File         destFile = new File(dir.getPath() + File.separator + tempAudioName);
+
+      SoundFile mSoundFile;
+      try {
+        mSoundFile = SoundFile.create(audioStartPath, null);
+        if (startTime == 0 && endTime == 0){
+          return;
+        }
+        mSoundFile.WriteFile(destFile, startTime, endTime);
+      } catch (IOException e) {
+        e.printStackTrace();
+      } catch (SoundFile.InvalidInputException e) {
+        e.printStackTrace();
+      }
+
+
+
+//      try {
+//          new AudioCutter().genVideoUsingMuxer(
+//              audioStartPath,
+//              destFile.getPath(),
+//              startPosition,
+//              endPosition,
+//              true,
+//              false
+//          );
+//        } catch (Exception e) {
+//          String msg = e.getMessage();
+//          Toast.makeText(this, msg, Toast.LENGTH_SHORT).show();
 //        }
-//      }
+    }
 
-//      return;
-//    }
 
-    compositeDisposable.add(
-        arabicDatabaseUtils
-            .getVerses(start, end)
-            .filter(quranAyahs -> quranAyahs.size() > 0)
-            .observeOn(AndroidSchedulers.mainThread())
-            .subscribe(quranAyahs -> {
-//              if (isCopy) {
-//                shareUtil.copyVerses(PagerActivity.this, quranAyahs);
-//              } else {
-                shareUtil.shareVerses(PagerActivity.this, quranAyahs);
-//              }
-            }));
+
+//    compositeDisposable.add(
+//        arabicDatabaseUtils
+//            .getVerses(start, end)
+//            .filter(quranAyahs -> quranAyahs.size() > 0)
+//            .observeOn(AndroidSchedulers.mainThread())
+//            .subscribe(quranAyahs -> {
+////              if (isCopy) {
+////                shareUtil.copyVerses(PagerActivity.this, quranAyahs);
+////              } else {
+//                shareUtil.shareVerses(PagerActivity.this, quranAyahs);
+////              }
+//            }));
   }
 
   private void showProgressDialog() {

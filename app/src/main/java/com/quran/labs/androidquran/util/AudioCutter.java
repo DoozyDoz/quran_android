@@ -56,8 +56,6 @@ public class AudioCutter {
             boolean     selectCurrentTrack = false;
             if (mime.startsWith("audio/") && useAudio) {
                 selectCurrentTrack = true;
-            } else if (mime.startsWith("video/") && useVideo) {
-                selectCurrentTrack = true;
             }
             if (selectCurrentTrack) {
                 extractor.selectTrack(i);
