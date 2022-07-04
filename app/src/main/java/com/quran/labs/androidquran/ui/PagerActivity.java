@@ -17,6 +17,7 @@ import android.content.res.Configuration;
 import android.content.res.Resources;
 import android.os.Build;
 import android.os.Bundle;
+import android.os.Environment;
 import android.os.Handler;
 import android.os.Message;
 import android.preference.PreferenceManager;
@@ -70,6 +71,7 @@ import com.quran.labs.androidquran.common.LocalTranslation;
 import com.quran.labs.androidquran.common.LocalTranslationDisplaySort;
 import com.quran.labs.androidquran.common.QuranAyahInfo;
 import com.quran.labs.androidquran.common.audio.QariItem;
+import com.quran.labs.androidquran.dao.audio.AudioPathInfo;
 import com.quran.labs.androidquran.dao.audio.AudioRequest;
 import com.quran.labs.androidquran.data.Constants;
 import com.quran.labs.androidquran.data.QuranDataProvider;
@@ -103,6 +105,7 @@ import com.quran.labs.androidquran.ui.helpers.QuranPageAdapter;
 import com.quran.labs.androidquran.ui.helpers.SlidingPagerAdapter;
 import com.quran.labs.androidquran.ui.util.ToastCompat;
 import com.quran.labs.androidquran.ui.util.TranslationsSpinnerAdapter;
+import com.quran.labs.androidquran.util.AudioCutter;
 import com.quran.labs.androidquran.util.AudioUtils;
 import com.quran.labs.androidquran.util.QuranAppUtils;
 import com.quran.labs.androidquran.util.QuranFileUtils;
@@ -123,12 +126,14 @@ import com.quran.page.common.toolbar.di.AyahToolBarInjector;
 import com.quran.reading.common.AudioEventPresenter;
 import com.quran.reading.common.ReadingEventPresenter;
 
+import java.io.File;
 import java.lang.ref.WeakReference;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
+import java.util.UUID;
 import java.util.concurrent.TimeUnit;
 
 import javax.inject.Inject;
@@ -141,6 +146,8 @@ import io.reactivex.rxjava3.disposables.CompositeDisposable;
 import io.reactivex.rxjava3.observers.DisposableObserver;
 import io.reactivex.rxjava3.observers.DisposableSingleObserver;
 import io.reactivex.rxjava3.schedulers.Schedulers;
+import kotlin.TuplesKt;
+import kotlin.jvm.internal.Intrinsics;
 import timber.log.Timber;
 
 /**
@@ -231,7 +238,8 @@ public class PagerActivity extends AppCompatActivity implements
   @Inject ShareUtil shareUtil;
   @Inject AudioUtils audioUtils;
   @Inject QuranDisplayData quranDisplayData;
-  @Inject QuranInfo quranInfo;
+  @Inject QuranInfo      quranInfo;
+  @Inject AudioCutter    audioCutter;
   @Inject QuranFileUtils quranFileUtils;
   @Inject AudioPresenter audioPresenter;
   @Inject QuranEventLogger quranEventLogger;
@@ -1760,6 +1768,8 @@ public class PagerActivity extends AppCompatActivity implements
         shareAyahLink(startSuraAyah, endSuraAyah);
       } else if (itemId == com.quran.labs.androidquran.common.toolbar.R.id.cab_share_ayah_text) {
         shareAyah(startSuraAyah, endSuraAyah, false);
+      }else if (itemId == com.quran.labs.androidquran.common.toolbar.R.id.cab_share_ayah_audio) {
+        shareAyahAudio(startSuraAyah, endSuraAyah);
       } else if (itemId == com.quran.labs.androidquran.common.toolbar.R.id.cab_copy_ayah) {
         shareAyah(startSuraAyah, endSuraAyah, true);
       } else {
@@ -1835,6 +1845,109 @@ public class PagerActivity extends AppCompatActivity implements
               }
             })
     );
+  }
+  private AudioPathInfo getLocalAudioPathInfo(QariItem qari){
+    String localPath = audioUtils.getLocalQariUri(this,qari);
+    if (localPath != null){
+      String databasePath = audioUtils.getQariDatabasePathIfGapless(this,qari);
+      String urlFormat = databasePath.isEmpty() ? localPath + File.separator + "%d" + File.separator +
+            "%d" + AudioUtils.AUDIO_EXTENSION:localPath + File.separator + "%03d" + AudioUtils.AUDIO_EXTENSION;
+      return new AudioPathInfo(urlFormat, localPath, databasePath);
+    }
+    return null;
+  }
+
+  private Boolean haveAllFiles(AudioPathInfo audioPathInfo,SuraAyah start ,SuraAyah end) {
+    return audioUtils.haveAllFiles(audioPathInfo.getUrlFormat(),
+        audioPathInfo.getLocalDirectory(), start, end, audioPathInfo.getGaplessDatabase() != null);
+  }
+
+  public void shareAyahAudio(SuraAyah start, SuraAyah end) {
+    if (start == null || end == null) {
+      return;
+    } else if (!quranFileUtils.hasArabicSearchDatabase()) {
+      showGetRequiredFilesDialog();
+      return;
+    }
+
+//    final LocalTranslation[] translationNames = lastActivatedLocalTranslations;
+//    if (showingTranslation && translationNames != null) {
+
+      // temporarily required so "lastSelectedTranslationAyah" isn't null
+      // the real solution is to move this sharing logic out of PagerActivity
+      // in the future and avoid this back and forth with the translation fragment.
+//      updateLocalTranslations(start);
+//      final QuranAyahInfo quranAyahInfo = lastSelectedTranslationAyah;
+//      if (quranAyahInfo != null) {
+        String newPath = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MUSIC).getPath() +
+            File.separator +"quran_android";
+
+        File dir = new File(newPath);
+        if (!dir.exists()) {
+          if (!dir.mkdirs()){
+            Toast.makeText(this, "could not create directory", Toast.LENGTH_SHORT).show();
+          }
+        }
+
+        File         destFile = new File(dir.getPath() + File.separator + UUID.randomUUID().toString() + ".mp3");
+        final QariItem qari = audioStatusBar.getAudioInfo();
+        AudioPathInfo audioPathInfo = getLocalAudioPathInfo(qari);
+        if (audioPathInfo != null) {
+          final boolean shouldStream = quranSettings.shouldStream();
+          boolean stream = shouldStream && !haveAllFiles(audioPathInfo, start, end);
+
+          AudioPathInfo audioPath = stream? audioPathInfo.copy(audioUtils.getQariUrl(qari),null,null):audioPathInfo;
+
+          kotlin.Pair pair;
+          if (start.compareTo(end) <= 0) {
+            pair = TuplesKt.to(start, end);
+          } else {
+            Timber.Forest.e(new IllegalStateException("End isn't larger than the start: " + start + " to " + end));
+            pair = TuplesKt.to(end, start);
+          }
+
+          kotlin.Pair pair2       = pair;
+          SuraAyah    actualStart = (SuraAyah)pair2.component1();
+          SuraAyah actualEnd = (SuraAyah)pair2.component2();
+          AudioRequest audioRequest = new AudioRequest(
+              actualStart, actualEnd, qari, 0, 0, true, stream, audioPath);
+          try {
+            new AudioCutter().genVideoUsingMuxer(
+                audioPath.getLocalDirectory(),
+                destFile.getPath(),
+                -1,
+                -1,
+                true,
+                false
+            );
+          } catch (Exception e) {
+
+          }
+        }
+
+//        final String shareText = shareUtil.getShareText(this, quranAyahInfo, translationNames);
+//        if (isCopy) {
+//          shareUtil.copyToClipboard(this, shareText);
+//        } else {
+//          shareUtil.shareViaIntent(this, shareText, com.quran.labs.androidquran.common.toolbar.R.string.share_ayah_text);
+//        }
+//      }
+
+//      return;
+//    }
+
+    compositeDisposable.add(
+        arabicDatabaseUtils
+            .getVerses(start, end)
+            .filter(quranAyahs -> quranAyahs.size() > 0)
+            .observeOn(AndroidSchedulers.mainThread())
+            .subscribe(quranAyahs -> {
+//              if (isCopy) {
+//                shareUtil.copyVerses(PagerActivity.this, quranAyahs);
+//              } else {
+                shareUtil.shareVerses(PagerActivity.this, quranAyahs);
+//              }
+            }));
   }
 
   private void showProgressDialog() {
