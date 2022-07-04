@@ -1,5 +1,6 @@
 package com.quran.labs.androidquran.ui;
 
+import static android.content.Intent.EXTRA_STREAM;
 import static com.quran.labs.androidquran.database.DatabaseUtils.closeCursor;
 import static com.quran.labs.androidquran.database.SuraTimingDatabaseHandler.getDatabaseHandler;
 import static com.quran.labs.androidquran.ui.helpers.SlidingPagerAdapter.AUDIO_PAGE;
@@ -8,6 +9,7 @@ import static com.quran.labs.androidquran.ui.helpers.SlidingPagerAdapter.TRANSLA
 
 import android.app.ProgressDialog;
 import android.app.SearchManager;
+import android.content.ActivityNotFoundException;
 import android.content.BroadcastReceiver;
 import android.content.ComponentName;
 import android.content.Context;
@@ -19,12 +21,14 @@ import android.content.res.Configuration;
 import android.content.res.Resources;
 import android.database.Cursor;
 import android.database.SQLException;
+import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.Environment;
 import android.os.Handler;
 import android.os.Message;
 import android.preference.PreferenceManager;
+import android.provider.MediaStore;
 import android.text.TextUtils;
 import android.util.SparseBooleanArray;
 import android.util.SparseIntArray;
@@ -1880,47 +1884,88 @@ public class PagerActivity extends AppCompatActivity implements
         audioPathInfo.getLocalDirectory(), start, end, audioPathInfo.getGaplessDatabase() != null);
   }
 
-  private void updateGaplessData(String databasePath,int sura) {
-    Disposable disposable = this.timingDisposable;
-    if (disposable != null) {
-      disposable.dispose();
-    }
+  private void updateGaplessData(String databasePath,SuraAyah start, SuraAyah end,String path) {
+    compositeDisposable.add(
+        Single.fromCallable(() -> {
+          SuraTimingDatabaseHandler db     = SuraTimingDatabaseHandler.Companion.getDatabaseHandler(databasePath);
+          SparseIntArray            map    = new SparseIntArray();
+          Cursor                    cursor = null;
 
-    this.timingDisposable = Single.fromCallable(new Callable() {
-      public final SparseIntArray call() {
-        SuraTimingDatabaseHandler db     = SuraTimingDatabaseHandler.Companion.getDatabaseHandler(databasePath);
-        SparseIntArray            map    = new SparseIntArray();
-        Cursor                    cursor = null;
-
-        try {
-          cursor = db.getAyahTimings(sura);
-          Timber.Forest.d("got cursor of data", new Object[0]);
-          if (cursor != null && cursor.moveToFirst()) {
-            do {
-              int ayah = cursor.getInt(1);
-              int time = cursor.getInt(2);
-              map.put(ayah, time);
-            } while (cursor.moveToNext());
+          try {
+            cursor = db.getAyahTimings(start.sura);
+            Timber.Forest.d("got cursor of data", new Object[0]);
+            if (cursor != null && cursor.moveToFirst()) {
+              do {
+                int ayah = cursor.getInt(1);
+                int time = cursor.getInt(2);
+                map.put(ayah, time);
+              } while (cursor.moveToNext());
+            }
+          } catch (SQLException sqlException) {
+            Timber.Forest.e(sqlException);
+          } finally {
+            closeCursor(cursor);
           }
-        } catch (SQLException sqlException) {
-          Timber.Forest.e(sqlException);
-        } finally {
-          DatabaseUtils.closeCursor(cursor);
-        }
-        return map;
-      }
-    }).subscribeOn(Schedulers.io()).observeOn(AndroidSchedulers.mainThread()).subscribe(new BiConsumer() {
-      public void accept(Object obj, Object throwable) {
-        this.accept((SparseIntArray) obj, (Throwable) throwable);
-      }
+          return map;
+        }).subscribeOn(Schedulers.io())
+            .observeOn(AndroidSchedulers.mainThread())
+            .subscribeWith(new DisposableSingleObserver<SparseIntArray>() {
+              @Override
+              public void onSuccess(@io.reactivex.rxjava3.annotations.NonNull SparseIntArray sparseIntArray) {
+                PagerActivity.this.gaplessSura = start.sura;
+                PagerActivity pagerActivity = PagerActivity.this;
+                Intrinsics.checkNotNullExpressionValue(sparseIntArray, "map");
+                pagerActivity.gaplessSuraData = sparseIntArray;
+                int ayah1 = start.ayah;
+                int ayah2 = end.ayah;
+                int startPosition = ayah1 == 1?gaplessSuraData.get(0):gaplessSuraData.get(ayah1);
+                int endPosition = ayah2 == 1?gaplessSuraData.get(0):gaplessSuraData.get(ayah2+1);
+                float startTime = (float) startPosition/1000;
+                float endTime = (float) endPosition/1000;
 
-      public final void accept(SparseIntArray map, Throwable throwable) {
-        PagerActivity.this.gaplessSura = sura;
-        PagerActivity pagerActivity = PagerActivity.this;
-        Intrinsics.checkNotNullExpressionValue(map, "map");
-        pagerActivity.gaplessSuraData = map;
-      }
-    });
+                final SoundFile[] mSoundFile = new SoundFile[1];
+                String newPath = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MUSIC).getPath() +
+                    File.separator +"quran_android_cache";
+
+                File dir = new File(newPath);
+                if (!dir.exists()) {
+                  if (!dir.mkdirs()){
+                    Toast.makeText(PagerActivity.this, "could not create directory", Toast.LENGTH_SHORT).show();
+                  }
+                }
+
+                String tempAudioName = UUID.randomUUID().toString() + ".m4a";
+                File         destFile = new File(dir.getPath() + File.separator + tempAudioName);
+                compositeDisposable.add(
+                    Single.fromCallable(()->
+                            SoundFile.create(path, null)).subscribeOn(Schedulers.io())
+                        .observeOn(AndroidSchedulers.mainThread())
+                        .subscribeWith(new DisposableSingleObserver<SoundFile>() {
+                          @Override
+                          public void onSuccess(@io.reactivex.rxjava3.annotations.NonNull SoundFile soundFile) {
+                            try {
+                              mSoundFile[0] = soundFile;
+                              if (startTime == 0 && endTime == 0){
+                                return;
+                              }
+                              mSoundFile[0].WriteFile(destFile, startTime, endTime);
+                              sharePathIntent(destFile.getPath(), BuildConfig.APPLICATION_ID);
+                            } catch (IOException e) {
+                              e.printStackTrace();
+                            }
+                          }
+                          @Override
+                          public void onError(@io.reactivex.rxjava3.annotations.NonNull Throwable e) {
+                          }
+                        }));
+              }
+
+              @Override
+              public void onError(@io.reactivex.rxjava3.annotations.NonNull Throwable e) {
+
+              }
+            })
+    );
   }
 
   public void shareAyahAudio(SuraAyah start, SuraAyah end) {
@@ -1951,13 +1996,13 @@ public class PagerActivity extends AppCompatActivity implements
     String audioEndPath = String.format(Locale.US, audioPathInfo.getLocalDirectory(), actualEnd.sura);
 
     if (audioPathInfo.getGaplessDatabase() != null) {
-      this.updateGaplessData(audioPathInfo.getGaplessDatabase(), actualStart.sura);
+      this.updateGaplessData(audioPathInfo.getGaplessDatabase(), actualStart,actualEnd,audioStartPath);
       int ayah1 = actualStart.ayah;
       int ayah2 = actualEnd.ayah;
       int startPosition = ayah1 == 1?gaplessSuraData.get(0):gaplessSuraData.get(ayah1);
-      int endPosition = ayah2 == 1?gaplessSuraData.get(0):gaplessSuraData.get(ayah2);
-      float startTime = startPosition/1000;
-      float endTime = endPosition/1000;
+      int endPosition = ayah2 == 1?gaplessSuraData.get(0):gaplessSuraData.get(ayah2+1);
+      float startTime = (float) startPosition/1000;
+      float endTime = (float) endPosition/1000;
 
       String newPath = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MUSIC).getPath() +
           File.separator +"quran_android_cache";
@@ -1972,51 +2017,59 @@ public class PagerActivity extends AppCompatActivity implements
       String tempAudioName = UUID.randomUUID().toString() + ".m4a";
       File         destFile = new File(dir.getPath() + File.separator + tempAudioName);
 
-      SoundFile mSoundFile;
-      try {
-        mSoundFile = SoundFile.create(audioStartPath, null);
-        if (startTime == 0 && endTime == 0){
-          return;
-        }
-        mSoundFile.WriteFile(destFile, startTime, endTime);
-      } catch (IOException e) {
-        e.printStackTrace();
-      } catch (SoundFile.InvalidInputException e) {
-        e.printStackTrace();
-      }
+      final SoundFile[] mSoundFile = new SoundFile[1];
+      compositeDisposable.add(
+          Single.fromCallable(()->
+              SoundFile.create(audioStartPath, null)).subscribeOn(Schedulers.io())
+              .observeOn(AndroidSchedulers.mainThread())
+              .subscribeWith(new DisposableSingleObserver<SoundFile>() {
+                @Override
+                public void onSuccess(@io.reactivex.rxjava3.annotations.NonNull SoundFile soundFile) {
+                  try {
+                    mSoundFile[0] = soundFile;
+                    if (startTime == 0 && endTime == 0){
+                      return;
+                    }
+                    mSoundFile[0].WriteFile(destFile, startTime, endTime);
+                    sharePathIntent(destFile.getPath(), BuildConfig.APPLICATION_ID);
+                  } catch (IOException e) {
+                    e.printStackTrace();
+                  }
+                }
+                @Override
+                public void onError(@io.reactivex.rxjava3.annotations.NonNull Throwable e) {
+                }
+              }));
+    }
+  }
 
-
-
-//      try {
-//          new AudioCutter().genVideoUsingMuxer(
-//              audioStartPath,
-//              destFile.getPath(),
-//              startPosition,
-//              endPosition,
-//              true,
-//              false
-//          );
-//        } catch (Exception e) {
-//          String msg = e.getMessage();
-//          Toast.makeText(this, msg, Toast.LENGTH_SHORT).show();
-//        }
+  private void sharePathIntent(String path, String applicationId) {
+    Uri newUri;
+    Uri nUri = Uri.parse(path);
+    Intent shareIntent = new Intent();
+    shareIntent.setAction(Intent.ACTION_SEND);
+    shareIntent.putExtra(EXTRA_STREAM,nUri);
+    shareIntent.setType("audio/m4a");
+    shareIntent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+        startActivity(Intent.createChooser(shareIntent, "Share"));
     }
 
+  private Uri getMediaContent(String path, Uri uri) {
+    String[] projection = new String[]{MediaStore.Images.Media._ID};
+    String selection = MediaStore.Images.Media.DATA + "= ?";
+    String[] selectionArgs = new String[]{path};
+    try {
+      Cursor cursor = getApplicationContext().getContentResolver().query(uri, projection, selection, selectionArgs, null);
+        if (cursor.moveToFirst()) {
+          String id = cursor.getInt(cursor.getColumnIndex(MediaStore.Images.Media._ID))+"";
+          return Uri.withAppendedPath(uri, id);
+        }
 
-
-//    compositeDisposable.add(
-//        arabicDatabaseUtils
-//            .getVerses(start, end)
-//            .filter(quranAyahs -> quranAyahs.size() > 0)
-//            .observeOn(AndroidSchedulers.mainThread())
-//            .subscribe(quranAyahs -> {
-////              if (isCopy) {
-////                shareUtil.copyVerses(PagerActivity.this, quranAyahs);
-////              } else {
-//                shareUtil.shareVerses(PagerActivity.this, quranAyahs);
-////              }
-//            }));
+    } catch (Exception e) {
+    }
+    return null;
   }
+
 
   private void showProgressDialog() {
     if (progressDialog == null) {
