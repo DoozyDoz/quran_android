@@ -51,6 +51,7 @@ import androidx.appcompat.widget.SearchView;
 import androidx.appcompat.widget.Toolbar;
 import androidx.core.app.ActivityCompat;
 import androidx.core.content.ContextCompat;
+import androidx.core.content.FileProvider;
 import androidx.core.util.Pair;
 import androidx.core.view.ViewCompat;
 import androidx.fragment.app.Fragment;
@@ -116,7 +117,6 @@ import com.quran.labs.androidquran.ui.helpers.QuranPageAdapter;
 import com.quran.labs.androidquran.ui.helpers.SlidingPagerAdapter;
 import com.quran.labs.androidquran.ui.util.ToastCompat;
 import com.quran.labs.androidquran.ui.util.TranslationsSpinnerAdapter;
-import com.quran.labs.androidquran.util.AudioCutter;
 import com.quran.labs.androidquran.util.AudioUtils;
 import com.quran.labs.androidquran.util.QuranAppUtils;
 import com.quran.labs.androidquran.util.QuranFileUtils;
@@ -256,7 +256,6 @@ public class PagerActivity extends AppCompatActivity implements
   @Inject AudioUtils audioUtils;
   @Inject QuranDisplayData quranDisplayData;
   @Inject QuranInfo      quranInfo;
-  @Inject AudioCutter    audioCutter;
   @Inject QuranFileUtils quranFileUtils;
   @Inject AudioPresenter audioPresenter;
   @Inject QuranEventLogger quranEventLogger;
@@ -1879,12 +1878,9 @@ public class PagerActivity extends AppCompatActivity implements
     return null;
   }
 
-  private Boolean haveAllFiles(AudioPathInfo audioPathInfo,SuraAyah start ,SuraAyah end) {
-    return audioUtils.haveAllFiles(audioPathInfo.getUrlFormat(),
-        audioPathInfo.getLocalDirectory(), start, end, audioPathInfo.getGaplessDatabase() != null);
-  }
 
   private void updateGaplessData(String databasePath,SuraAyah start, SuraAyah end,String path) {
+    showProgressDialog();
     compositeDisposable.add(
         Single.fromCallable(() -> {
           SuraTimingDatabaseHandler db     = SuraTimingDatabaseHandler.Companion.getDatabaseHandler(databasePath);
@@ -1949,7 +1945,8 @@ public class PagerActivity extends AppCompatActivity implements
                                 return;
                               }
                               mSoundFile[0].WriteFile(destFile, startTime, endTime);
-                              sharePathIntent(destFile.getPath(), BuildConfig.APPLICATION_ID);
+                              sharePathIntent(destFile, BuildConfig.APPLICATION_ID);
+                              dismissProgressDialog();
                             } catch (IOException e) {
                               e.printStackTrace();
                             }
@@ -1991,85 +1988,20 @@ public class PagerActivity extends AppCompatActivity implements
     final QariItem qari = audioStatusBar.getAudioInfo();
     AudioPathInfo audioPathInfo = getLocalAudioPathInfo(qari);
 
-    //get audio path
-    String audioStartPath = String.format(Locale.US, audioPathInfo.getLocalDirectory(), actualStart.sura);
-    String audioEndPath = String.format(Locale.US, audioPathInfo.getLocalDirectory(), actualEnd.sura);
-
     if (audioPathInfo.getGaplessDatabase() != null) {
-      this.updateGaplessData(audioPathInfo.getGaplessDatabase(), actualStart,actualEnd,audioStartPath);
-      int ayah1 = actualStart.ayah;
-      int ayah2 = actualEnd.ayah;
-      int startPosition = ayah1 == 1?gaplessSuraData.get(0):gaplessSuraData.get(ayah1);
-      int endPosition = ayah2 == 1?gaplessSuraData.get(0):gaplessSuraData.get(ayah2+1);
-      float startTime = (float) startPosition/1000;
-      float endTime = (float) endPosition/1000;
-
-      String newPath = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MUSIC).getPath() +
-          File.separator +"quran_android_cache";
-
-      File dir = new File(newPath);
-      if (!dir.exists()) {
-        if (!dir.mkdirs()){
-          Toast.makeText(this, "could not create directory", Toast.LENGTH_SHORT).show();
-        }
-      }
-
-      String tempAudioName = UUID.randomUUID().toString() + ".m4a";
-      File         destFile = new File(dir.getPath() + File.separator + tempAudioName);
-
-      final SoundFile[] mSoundFile = new SoundFile[1];
-      compositeDisposable.add(
-          Single.fromCallable(()->
-              SoundFile.create(audioStartPath, null)).subscribeOn(Schedulers.io())
-              .observeOn(AndroidSchedulers.mainThread())
-              .subscribeWith(new DisposableSingleObserver<SoundFile>() {
-                @Override
-                public void onSuccess(@io.reactivex.rxjava3.annotations.NonNull SoundFile soundFile) {
-                  try {
-                    mSoundFile[0] = soundFile;
-                    if (startTime == 0 && endTime == 0){
-                      return;
-                    }
-                    mSoundFile[0].WriteFile(destFile, startTime, endTime);
-                    sharePathIntent(destFile.getPath(), BuildConfig.APPLICATION_ID);
-                  } catch (IOException e) {
-                    e.printStackTrace();
-                  }
-                }
-                @Override
-                public void onError(@io.reactivex.rxjava3.annotations.NonNull Throwable e) {
-                }
-              }));
+      updateGaplessData(audioPathInfo.getGaplessDatabase(), actualStart,actualEnd,audioStartPath);
     }
   }
 
-  private void sharePathIntent(String path, String applicationId) {
-    Uri newUri;
-    Uri nUri = Uri.parse(path);
-    Intent shareIntent = new Intent();
-    shareIntent.setAction(Intent.ACTION_SEND);
-    shareIntent.putExtra(EXTRA_STREAM,nUri);
+  private void sharePathIntent(File file, String applicationId) {
+    String authorities = BuildConfig.APPLICATION_ID + ".fileprovider";
+    Uri    uri        = FileProvider.getUriForFile(this, authorities, file);
+    Intent shareIntent = new Intent(Intent.ACTION_SEND);
+    shareIntent.putExtra(EXTRA_STREAM,uri);
     shareIntent.setType("audio/m4a");
     shareIntent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
-        startActivity(Intent.createChooser(shareIntent, "Share"));
+    startActivity(Intent.createChooser(shareIntent, "Share"));
     }
-
-  private Uri getMediaContent(String path, Uri uri) {
-    String[] projection = new String[]{MediaStore.Images.Media._ID};
-    String selection = MediaStore.Images.Media.DATA + "= ?";
-    String[] selectionArgs = new String[]{path};
-    try {
-      Cursor cursor = getApplicationContext().getContentResolver().query(uri, projection, selection, selectionArgs, null);
-        if (cursor.moveToFirst()) {
-          String id = cursor.getInt(cursor.getColumnIndex(MediaStore.Images.Media._ID))+"";
-          return Uri.withAppendedPath(uri, id);
-        }
-
-    } catch (Exception e) {
-    }
-    return null;
-  }
-
 
   private void showProgressDialog() {
     if (progressDialog == null) {

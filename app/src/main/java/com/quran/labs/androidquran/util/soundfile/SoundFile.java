@@ -1,19 +1,13 @@
 package com.quran.labs.androidquran.util.soundfile;
 
-import android.media.AudioFormat;
-import android.media.AudioRecord;
 import android.media.MediaCodec;
 import android.media.MediaExtractor;
 import android.media.MediaFormat;
-import android.media.MediaRecorder;
 import android.os.Build;
-import android.os.Environment;
 import android.util.Log;
 
-import java.io.BufferedWriter;
 import java.io.File;
 import java.io.FileOutputStream;
-import java.io.FileWriter;
 import java.io.IOException;
 import java.io.PrintWriter;
 import java.io.StringWriter;
@@ -70,16 +64,6 @@ public class SoundFile {
         return new String[] {"mp3", "wav", "3gpp", "3gp", "amr", "aac", "m4a", "ogg"};
     }
 
-    public static boolean isFilenameSupported(String filename) {
-        String[] extensions = getSupportedExtensions();
-        for (int i=0; i<extensions.length; i++) {
-            if (filename.endsWith("." + extensions[i])) {
-                return true;
-            }
-        }
-        return false;
-    }
-
     // Create and return a SoundFile object using the file fileName.
     public static SoundFile create(String fileName,
                                    ProgressListener progressListener)
@@ -104,55 +88,9 @@ public class SoundFile {
         return soundFile;
     }
 
-    // Create and return a SoundFile object by recording a mono audio stream.
-    public static SoundFile record(ProgressListener progressListener) {
-        if (progressListener ==  null) {
-            // must have a progessListener to stop the recording.
-            return null;
-        }
-        SoundFile soundFile = new SoundFile();
-        soundFile.setProgressListener(progressListener);
-        soundFile.RecordAudio();
-        return soundFile;
-    }
-
-    public String getFiletype() {
-        return mFileType;
-    }
-
-    public int getFileSizeBytes() {
-        return mFileSize;
-    }
-
-    public int getAvgBitrateKbps() {
-        return mAvgBitRate;
-    }
-
-    public int getSampleRate() {
-        return mSampleRate;
-    }
-
-    public int getChannels() {
-        return mChannels;
-    }
-
-    public int getNumSamples() {
-        return mNumSamples;  // Number of samples per channel.
-    }
-
-    // Should be removed when the app will use directly the samples instead of the frames.
-    public int getNumFrames() {
-        return mNumFrames;
-    }
-
     // Should be removed when the app will use directly the samples instead of the frames.
     public int getSamplesPerFrame() {
         return 1024;  // just a fixed value here...
-    }
-
-    // Should be removed when the app will use directly the samples instead of the frames.
-    public int[] getFrameGains() {
-        return mFrameGains;
     }
 
     public ShortBuffer getSamples() {
@@ -382,109 +320,6 @@ public class SoundFile {
         // DumpSamples();  // Uncomment this line to dump the samples in a TSV file.
     }
 
-    private void RecordAudio() {
-        if (mProgressListener ==  null) {
-            // A progress listener is mandatory here, as it will let us know when to stop recording.
-            return;
-        }
-        mInputFile = null;
-        mFileType = "raw";
-        mFileSize = 0;
-        mSampleRate = 44100;
-        mChannels = 1;  // record mono audio.
-        short[] buffer = new short[1024];  // buffer contains 1 mono frame of 1024 16 bits samples
-        int minBufferSize = AudioRecord.getMinBufferSize(
-                mSampleRate, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT);
-        // make sure minBufferSize can contain at least 1 second of audio (16 bits sample).
-        if (minBufferSize < mSampleRate * 2) {
-            minBufferSize = mSampleRate * 2;
-        }
-        AudioRecord audioRecord = new AudioRecord(
-                MediaRecorder.AudioSource.DEFAULT,
-                mSampleRate,
-                AudioFormat.CHANNEL_IN_MONO,
-                AudioFormat.ENCODING_PCM_16BIT,
-                minBufferSize
-                );
-
-        // Allocate memory for 20 seconds first. Reallocate later if more is needed.
-        mDecodedBytes = ByteBuffer.allocate(20 * mSampleRate * 2);
-        mDecodedBytes.order(ByteOrder.LITTLE_ENDIAN);
-        mDecodedSamples = mDecodedBytes.asShortBuffer();
-        audioRecord.startRecording();
-        while (true) {
-            // check if mDecodedSamples can contain 1024 additional samples.
-            if (mDecodedSamples.remaining() < 1024) {
-                // Try to allocate memory for 10 additional seconds.
-                int newCapacity = mDecodedBytes.capacity() + 10 * mSampleRate * 2;
-                ByteBuffer newDecodedBytes = null;
-                try {
-                    newDecodedBytes = ByteBuffer.allocate(newCapacity);
-                } catch (OutOfMemoryError oome) {
-                    break;
-                }
-                int position = mDecodedSamples.position();
-                mDecodedBytes.rewind();
-                newDecodedBytes.put(mDecodedBytes);
-                mDecodedBytes = newDecodedBytes;
-                mDecodedBytes.order(ByteOrder.LITTLE_ENDIAN);
-                mDecodedBytes.rewind();
-                mDecodedSamples = mDecodedBytes.asShortBuffer();
-                mDecodedSamples.position(position);
-            }
-            // TODO(nfaralli): maybe use the read method that takes a direct ByteBuffer argument.
-            audioRecord.read(buffer, 0, buffer.length);
-            mDecodedSamples.put(buffer);
-            // Let the progress listener know how many seconds have been recorded.
-            // The returned value tells us if we should keep recording or stop.
-            if (!mProgressListener.reportProgress(
-                    (float)(mDecodedSamples.position()) / mSampleRate)) {
-                break;
-            }
-        }
-        audioRecord.stop();
-        audioRecord.release();
-        mNumSamples = mDecodedSamples.position();
-        mDecodedSamples.rewind();
-        mDecodedBytes.rewind();
-        mAvgBitRate = mSampleRate * 16 / 1000;
-
-        // Temporary hack to make it work with the old version.
-        mNumFrames = mNumSamples / getSamplesPerFrame();
-        if (mNumSamples % getSamplesPerFrame() != 0){
-            mNumFrames++;
-        }
-        mFrameGains = new int[mNumFrames];
-        mFrameLens = null;  // not needed for recorded audio
-        mFrameOffsets = null;  // not needed for recorded audio
-        int i, j;
-        int gain, value;
-        for (i=0; i<mNumFrames; i++){
-            gain = -1;
-            for(j=0; j<getSamplesPerFrame(); j++) {
-                if (mDecodedSamples.remaining() > 0) {
-                    value = Math.abs(mDecodedSamples.get());
-                } else {
-                    value = 0;
-                }
-                if (gain < value) {
-                    gain = value;
-                }
-            }
-            mFrameGains[i] = (int)Math.sqrt(gain);  // here gain = sqrt(max value of 1st channel)...
-        }
-        mDecodedSamples.rewind();
-        // DumpSamples();  // Uncomment this line to dump the samples in a TSV file.
-    }
-
-    // should be removed in the near future...
-    public void WriteFile(File outputFile, int startFrame, int numFrames)
-            throws IOException {
-        float startTime = (float)startFrame * getSamplesPerFrame() / mSampleRate;
-        float endTime = (float)(startFrame + numFrames) * getSamplesPerFrame() / mSampleRate;
-        WriteFile(outputFile, startTime, endTime);
-    }
-
     public void WriteFile(File outputFile, float startTime, float endTime)
             throws IOException {
         int startOffset = (int)(startTime * mSampleRate) * 2 * mChannels;
@@ -622,145 +457,9 @@ public class SoundFile {
             }
             outputStream.close();
         } catch (IOException e) {
-            Log.e("Ringdroid", "Failed to create the .m4a file.");
-            Log.e("Ringdroid", getStackTrace(e));
+            Log.e("SoundFile", "Failed to create the .m4a file.");
+            Log.e("SoundFile", getStackTrace(e));
         }
-    }
-
-    // Method used to swap the left and right channels (needed for stereo WAV files).
-    // buffer contains the PCM data: {sample 1 right, sample 1 left, sample 2 right, etc.}
-    // The size of a sample is assumed to be 16 bits (for a single channel).
-    // When done, buffer will contain {sample 1 left, sample 1 right, sample 2 left, etc.}
-    private void swapLeftRightChannels(byte[] buffer) {
-        byte left[] = new byte[2];
-        byte right[] = new byte[2];
-        if (buffer.length % 4 != 0) {  // 2 channels, 2 bytes per sample (for one channel).
-            // Invalid buffer size.
-            return;
-        }
-        for (int offset = 0; offset < buffer.length; offset += 4) {
-            left[0] = buffer[offset];
-            left[1] = buffer[offset + 1];
-            right[0] = buffer[offset + 2];
-            right[1] = buffer[offset + 3];
-            buffer[offset] = right[0];
-            buffer[offset + 1] = right[1];
-            buffer[offset + 2] = left[0];
-            buffer[offset + 3] = left[1];
-        }
-    }
-
-    // should be removed in the near future...
-    public void WriteWAVFile(File outputFile, int startFrame, int numFrames)
-            throws IOException {
-        float startTime = (float)startFrame * getSamplesPerFrame() / mSampleRate;
-        float endTime = (float)(startFrame + numFrames) * getSamplesPerFrame() / mSampleRate;
-        WriteWAVFile(outputFile, startTime, endTime);
-    }
-
-    public void WriteWAVFile(File outputFile, float startTime, float endTime)
-            throws IOException {
-        int startOffset = (int)(startTime * mSampleRate) * 2 * mChannels;
-        int numSamples = (int)((endTime - startTime) * mSampleRate);
-
-        // Start by writing the RIFF header.
-        FileOutputStream outputStream = new FileOutputStream(outputFile);
-        outputStream.write(WAVHeader.getWAVHeader(mSampleRate, mChannels, numSamples));
-
-        // Write the samples to the file, 1024 at a time.
-        byte buffer[] = new byte[1024 * mChannels * 2];  // Each sample is coded with a short.
-        mDecodedBytes.position(startOffset);
-        int numBytesLeft = numSamples * mChannels * 2;
-        while (numBytesLeft >= buffer.length) {
-            if (mDecodedBytes.remaining() < buffer.length) {
-                // This should not happen.
-                for (int i = mDecodedBytes.remaining(); i < buffer.length; i++) {
-                    buffer[i] = 0;  // pad with extra 0s to make a full frame.
-                }
-                mDecodedBytes.get(buffer, 0, mDecodedBytes.remaining());
-            } else {
-                mDecodedBytes.get(buffer);
-            }
-            if (mChannels == 2) {
-                swapLeftRightChannels(buffer);
-            }
-            outputStream.write(buffer);
-            numBytesLeft -= buffer.length;
-        }
-        if (numBytesLeft > 0) {
-            if (mDecodedBytes.remaining() < numBytesLeft) {
-                // This should not happen.
-                for (int i = mDecodedBytes.remaining(); i < numBytesLeft; i++) {
-                    buffer[i] = 0;  // pad with extra 0s to make a full frame.
-                }
-                mDecodedBytes.get(buffer, 0, mDecodedBytes.remaining());
-            } else {
-                mDecodedBytes.get(buffer, 0, numBytesLeft);
-            }
-            if (mChannels == 2) {
-                swapLeftRightChannels(buffer);
-            }
-            outputStream.write(buffer, 0, numBytesLeft);
-        }
-        outputStream.close();
-    }
-
-    // Debugging method dumping all the samples in mDecodedSamples in a TSV file.
-    // Each row describes one sample and has the following format:
-    // "<presentation time in seconds>\t<channel 1>\t...\t<channel N>\n"
-    // File will be written on the SDCard under media/audio/debug/
-    // If fileName is null or empty, then the default file name (samples.tsv) is used.
-    private void DumpSamples(String fileName) {
-        String externalRootDir = Environment.getExternalStorageDirectory().getPath();
-        if (!externalRootDir.endsWith("/")) {
-            externalRootDir += "/";
-        }
-        String parentDir = externalRootDir + "media/audio/debug/";
-        // Create the parent directory
-        File parentDirFile = new File(parentDir);
-        parentDirFile.mkdirs();
-        // If we can't write to that special path, try just writing directly to the SDCard.
-        if (!parentDirFile.isDirectory()) {
-            parentDir = externalRootDir;
-        }
-        if (fileName == null || fileName.isEmpty()) {
-            fileName = "samples.tsv";
-        }
-        File outFile = new File(parentDir + fileName);
-
-        // Start dumping the samples.
-        BufferedWriter writer = null;
-        float presentationTime = 0;
-        mDecodedSamples.rewind();
-        String row;
-        try {
-            writer = new BufferedWriter(new FileWriter(outFile));
-            for (int sampleIndex = 0; sampleIndex < mNumSamples; sampleIndex++) {
-                presentationTime = (float)(sampleIndex) / mSampleRate;
-                row = Float.toString(presentationTime);
-                for (int channelIndex = 0; channelIndex < mChannels; channelIndex++) {
-                    row += "\t" + mDecodedSamples.get();
-                }
-                row += "\n";
-                writer.write(row);
-            }
-        } catch (IOException e) {
-            Log.w("Ringdroid", "Failed to create the sample TSV file.");
-            Log.w("Ringdroid", getStackTrace(e));
-        }
-        // We are done here. Close the file and rewind the buffer.
-        try {
-            writer.close();
-        } catch (Exception e) {
-            Log.w("Ringdroid", "Failed to close sample TSV file.");
-            Log.w("Ringdroid", getStackTrace(e));
-        }
-        mDecodedSamples.rewind();
-    }
-
-    // Helper method (samples will be dumped in media/audio/debug/samples.tsv).
-    private void DumpSamples() {
-        DumpSamples(null);
     }
 
     // Return the stack trace of a given exception.
