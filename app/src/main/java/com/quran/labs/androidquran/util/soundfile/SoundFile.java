@@ -3,6 +3,8 @@ package com.quran.labs.androidquran.util.soundfile;
 import android.media.MediaCodec;
 import android.media.MediaExtractor;
 import android.media.MediaFormat;
+import android.media.MediaMetadataRetriever;
+import android.net.Uri;
 import android.os.Build;
 import android.util.Log;
 
