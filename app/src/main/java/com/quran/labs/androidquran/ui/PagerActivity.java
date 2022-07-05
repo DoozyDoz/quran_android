@@ -144,6 +144,7 @@ import java.io.FileOutputStream;
 import java.io.IOException;
 import java.lang.ref.WeakReference;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashSet;
 import java.util.List;
@@ -1899,79 +1900,99 @@ public class PagerActivity extends AppCompatActivity implements
 
     assert audioPathInfo != null;
     if (audioPathInfo.getGaplessDatabase() != null) {
+
       updateGaplessData(actualStart,actualEnd,audioPathInfo);
     }
   }
 
+
+
   private void updateGaplessData(SuraAyah start, SuraAyah end, AudioPathInfo audioPathInfo) {
-    String databasePath = audioPathInfo.getGaplessDatabase();
     showProgressDialog();
+    String databasePath = audioPathInfo.getGaplessDatabase();
     compositeDisposable.add(
         Single.fromCallable(() -> {
               SuraTimingDatabaseHandler db     = SuraTimingDatabaseHandler.Companion.getDatabaseHandler(databasePath);
-              SparseIntArray            map    = new SparseIntArray();
-              Cursor                    cursor = null;
+              ArrayList<SparseIntArray>            mapArray    = new ArrayList<>();
+              SparseIntArray map1 = new SparseIntArray();
+              SparseIntArray map2 = new SparseIntArray();
+              Cursor                    cursor1 = null;
+              Cursor                    cursor2 = null;
 
               try {
-                cursor = db.getAyahTimings(start.sura);
+                cursor1 = db.getAyahTimings(start.sura);
                 Timber.Forest.d("got cursor of data", new Object[0]);
-                if (cursor != null && cursor.moveToFirst()) {
+                if (cursor1 != null && cursor1.moveToFirst()) {
                   do {
-                    int ayah = cursor.getInt(1);
-                    int time = cursor.getInt(2);
-                    map.put(ayah, time);
-                  } while (cursor.moveToNext());
+                    int ayah = cursor1.getInt(1);
+                    int time = cursor1.getInt(2);
+                    map1.put(ayah, time);
+                  } while (cursor1.moveToNext());
+                }
+
+                cursor2 = db.getAyahTimings(end.sura);
+                Timber.Forest.d("got cursor of data", new Object[0]);
+                if (cursor2 != null && cursor2.moveToFirst()) {
+                  do {
+                    int ayah = cursor2.getInt(1);
+                    int time = cursor2.getInt(2);
+                    map2.put(ayah, time);
+                  } while (cursor2.moveToNext());
                 }
               } catch (SQLException sqlException) {
                 Timber.Forest.e(sqlException);
               } finally {
-                closeCursor(cursor);
+                closeCursor(cursor2);
               }
-              return map;
+              mapArray.addAll(Arrays.asList(new SparseIntArray[]{map1, map2}));
+              return mapArray;
             }).subscribeOn(Schedulers.io())
             .observeOn(AndroidSchedulers.mainThread())
-            .subscribeWith(new DisposableSingleObserver<SparseIntArray>() {
+            .subscribeWith(new DisposableSingleObserver<ArrayList<SparseIntArray>>() {
               @Override
-              public void onSuccess(@io.reactivex.rxjava3.annotations.NonNull SparseIntArray sparseIntArray) {
-                PagerActivity.this.gaplessSura = start.sura;
+              public void onSuccess(@io.reactivex.rxjava3.annotations.NonNull ArrayList<SparseIntArray> sparseIntArrayList) {
                 PagerActivity pagerActivity = PagerActivity.this;
-                Intrinsics.checkNotNullExpressionValue(sparseIntArray, "map");
-                pagerActivity.gaplessSuraData = sparseIntArray;
+                Intrinsics.checkNotNullExpressionValue(sparseIntArrayList, "mapArray");
 
                 int startAyah = start.ayah;
                 int endAyah = end.ayah;
-                int startAyahTime = startAyah == 1?gaplessSuraData.get(0):gaplessSuraData.get(startAyah);
-                int endAyahTime = endAyah == 1?gaplessSuraData.get(0):gaplessSuraData.get(endAyah+1)==0?getSurahDuration(getSurahAudioPath(audioPathInfo,end)):gaplessSuraData.get(endAyah+1);
+                int startAyahTime = startAyah == 1?sparseIntArrayList.get(0).get(0):sparseIntArrayList.get(0).get(startAyah);
+                int endAyahTime = startAyah == 1?sparseIntArrayList.get(1).get(0):sparseIntArrayList.get(1).get(endAyah+1)==0?getSurahDuration(getSurahAudioPath(audioPathInfo,end.sura)):sparseIntArrayList.get(1).get(endAyah+1);
 
                 if (start.sura == end.sura){
-                  sharePathIntent(new File(getSurahSegment(getSurahAudioPath(audioPathInfo,start),startAyahTime,endAyahTime)),BuildConfig.APPLICATION_ID);
+                  sharePathIntent(new File(getSurahSegment(getSurahAudioPath(audioPathInfo,start.sura),startAyahTime,endAyahTime)),BuildConfig.APPLICATION_ID);
+                  dismissProgressDialog();
                 }else {
                   ArrayList<String> paths = new ArrayList<>();
+                  String path1  = getSurahAudioPath(audioPathInfo,start.sura);
+                  int upperCut = getSurahDuration(path1);
+                  String firstSegment = getSurahSegment(path1,startAyahTime,upperCut);
+                  String path2  = getSurahAudioPath(audioPathInfo,end.sura);
+                  String lastSegment = getSurahSegment(path2,0,endAyahTime);
+
                   for (int surahIndex = start.sura; surahIndex<=end.sura; surahIndex++){
                     if (surahIndex == start.sura){
-                      String path  = getSurahAudioPath(audioPathInfo,start);
-                      int upperCut = getSurahDuration(path);
-                      String segmentPath = getSurahSegment(path,startAyahTime,upperCut);
-                      paths.add(segmentPath);
+                      paths.add(firstSegment);
                       continue;
                     }
                     if (surahIndex != end.sura){
-                      paths.add(getSurahAudioPath(audioPathInfo,start));
+                      paths.add(getSurahAudioPath(audioPathInfo,surahIndex));
                       continue;
                     }
-                    String path  = getSurahAudioPath(audioPathInfo,end);
-                    String segmentPath = getSurahSegment(path, 0,endAyahTime);
-                    paths.add(segmentPath);
+                    paths.add(lastSegment);
                   }
                   if (!paths.isEmpty()){
                     File sharableAudioFile = getMergedAudioFromSegments(paths);
                     sharePathIntent(sharableAudioFile, BuildConfig.APPLICATION_ID);
+                    dismissProgressDialog();
                   }
                 }
+                
               }
 
               @Override
               public void onError(@io.reactivex.rxjava3.annotations.NonNull Throwable e) {
+                dismissProgressDialog();
 
               }
             })
@@ -1990,29 +2011,23 @@ public class PagerActivity extends AppCompatActivity implements
   }
 
   private File getMergedAudioFromSegments(ArrayList<String> segments) {
+    String mergedAudioPath = segments.get(0);
     if (segments.size() > 1){
-      String mergedAudioPath = null;
-      for(String segment: segments){
-        mergedAudioPath = mergeFiles(mergedAudioPath,segment);
+      for(int i =1;i< segments.size(); i++){
+        mergedAudioPath = mergeFiles(mergedAudioPath, segments.get(i));
       }
-      return new File(mergedAudioPath);
-    }else if (segments.size() == 1){
-      return new File(segments.get(0));
     }
-    return null;
+    return new File(mergedAudioPath);
   }
 
   private String getSurahSegment(String path, int lowerCut, int upperCut) {
     String tempAudioName = UUID.randomUUID().toString() + ".mp3";
     File         destFile = new File(audioCacheDirectory.getPath() + File.separator + tempAudioName);
     final CheapSoundFile[] mSoundFile = new CheapSoundFile[1];
-    new Thread() {
-      @Override
-      public void run() {
         try {
           mSoundFile[0] = CheapSoundFile.create(path, null);
           if (lowerCut == 0 && upperCut == 0){
-            return;
+            return null;
           }
           float startTime = (float) lowerCut/1000;
           float endTime = (float) upperCut/1000;
@@ -2025,7 +2040,6 @@ public class PagerActivity extends AppCompatActivity implements
         } catch (IOException e) {
           e.printStackTrace();
         };
-    }}.start();
     return destFile.getPath();
   }
 
@@ -2037,13 +2051,8 @@ public class PagerActivity extends AppCompatActivity implements
   }
 
   private String mergeFiles(String path1, String path2) {
-    String tempAudioName = UUID.randomUUID().toString() + ".m4a";
+    String tempAudioName = UUID.randomUUID().toString() + ".mp3";
     File         destFile = new File(audioCacheDirectory.getPath() + File.separator + tempAudioName);
-
-    if (path1 == null){
-      return destFile.getPath();
-    }
-
     try {
       FileInputStream fileInputStream = new FileInputStream(path1);
       byte[]           bArr             = new byte[1048576];
@@ -2080,8 +2089,8 @@ public class PagerActivity extends AppCompatActivity implements
 return null;
   }
 
-  private String getSurahAudioPath(AudioPathInfo audioPathInfo, SuraAyah suraAyah) {
-    return String.format(Locale.US, audioPathInfo.getLocalDirectory(), suraAyah.sura);
+  private String getSurahAudioPath(AudioPathInfo audioPathInfo, int surah) {
+    return String.format(Locale.US, audioPathInfo.getLocalDirectory(), surah);
   }
 
   private void sharePathIntent(File file, String applicationId) {

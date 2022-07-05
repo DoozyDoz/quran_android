@@ -19,7 +19,7 @@
           android:title="@string/share_ayah" />
       <item
           android:id="@+id/cab_share_ayah_text"
-          android:icon="@drawable/ic_share"
+          android:icon="@drawable/ic_text"
           android:title="@string/share_ayah_text" />
       <item
           android:id="@+id/cab_share_ayah_audio"
