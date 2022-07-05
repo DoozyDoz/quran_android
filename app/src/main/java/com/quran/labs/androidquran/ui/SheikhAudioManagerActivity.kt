@@ -29,7 +29,7 @@ import com.quran.data.core.QuranInfo
 import com.quran.data.model.SuraAyah
 import com.quran.labs.androidquran.QuranApplication
 import com.quran.labs.androidquran.R
-import com.quran.labs.androidquran.common.audio.QariItem
+import com.quran.labs.androidquran.common.audio.model.QariItem
 import com.quran.labs.androidquran.data.QuranDisplayData
 import com.quran.labs.androidquran.service.QuranDownloadService
 import com.quran.labs.androidquran.service.util.DefaultDownloadReceiver
@@ -270,7 +270,7 @@ class SheikhAudioManagerActivity : AppCompatActivity(), SimpleDownloadListener {
     }
 
   private fun deleteSurah(surah: Int): Boolean {
-    val fileUri = audioUtils.getLocalQariUri(this, qari) ?: return false
+    val fileUri = audioUtils.getLocalQariUri(qari) ?: return false
     var deletionSuccessful = true
     if (qari.isGapless) {
       val fileName = String.format(Locale.US, fileUri, surah)
