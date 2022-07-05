@@ -121,9 +121,7 @@ import com.quran.labs.androidquran.util.QuranScreenInfo;
 import com.quran.labs.androidquran.util.QuranSettings;
 import com.quran.labs.androidquran.util.QuranUtils;
 import com.quran.labs.androidquran.util.ShareUtil;
-import com.quran.labs.androidquran.util.audioConversionUtils.CheapAAC;
 import com.quran.labs.androidquran.util.audioConversionUtils.CheapSoundFile;
-import com.quran.labs.androidquran.util.soundfile.SoundFile;
 import com.quran.labs.androidquran.view.AudioStatusBar;
 import com.quran.labs.androidquran.view.IconPageIndicator;
 import com.quran.labs.androidquran.view.QuranSpinner;
@@ -1890,8 +1888,8 @@ public class PagerActivity extends AppCompatActivity implements
       }
 
       kotlin.Pair pair2       = pair;
-      actualStart = (SuraAyah)pair2.component1();
-      actualEnd = (SuraAyah)pair2.component2();
+      actualStart = (SuraAyah) pair2.component1();
+      actualEnd = (SuraAyah) pair2.component2();
     }
 
     //get audio info
@@ -1900,58 +1898,54 @@ public class PagerActivity extends AppCompatActivity implements
 
     assert audioPathInfo != null;
     if (audioPathInfo.getGaplessDatabase() != null) {
-
-      updateGaplessData(actualStart,actualEnd,audioPathInfo);
+      createAndShareAudio(actualStart,actualEnd,audioPathInfo);
     }
   }
 
-
-
-  private void updateGaplessData(SuraAyah start, SuraAyah end, AudioPathInfo audioPathInfo) {
+    private void createAndShareAudio(SuraAyah start, SuraAyah end, AudioPathInfo audioPathInfo) {
     showProgressDialog();
     String databasePath = audioPathInfo.getGaplessDatabase();
     compositeDisposable.add(
         Single.fromCallable(() -> {
-              SuraTimingDatabaseHandler db     = SuraTimingDatabaseHandler.Companion.getDatabaseHandler(databasePath);
-              ArrayList<SparseIntArray>            mapArray    = new ArrayList<>();
-              SparseIntArray map1 = new SparseIntArray();
-              SparseIntArray map2 = new SparseIntArray();
-              Cursor                    cursor1 = null;
-              Cursor                    cursor2 = null;
+              assert databasePath != null;
+              SuraTimingDatabaseHandler db              = SuraTimingDatabaseHandler.Companion.getDatabaseHandler(databasePath);
+              SparseIntArray            firstSurahMap   = new SparseIntArray();
+              SparseIntArray            lastSurahMap    = new SparseIntArray();
+              Cursor                    firstSurahCursor;
+              Cursor                    lastSurahCursor = null;
 
               try {
-                cursor1 = db.getAyahTimings(start.sura);
-                Timber.Forest.d("got cursor of data", new Object[0]);
-                if (cursor1 != null && cursor1.moveToFirst()) {
+                firstSurahCursor = db.getAyahTimings(start.sura);
+                Timber.Forest.d("got cursor of data");
+                if (firstSurahCursor != null && firstSurahCursor.moveToFirst()) {
                   do {
-                    int ayah = cursor1.getInt(1);
-                    int time = cursor1.getInt(2);
-                    map1.put(ayah, time);
-                  } while (cursor1.moveToNext());
+                    int ayah = firstSurahCursor.getInt(1);
+                    int time = firstSurahCursor.getInt(2);
+                    firstSurahMap.put(ayah, time);
+                  } while (firstSurahCursor.moveToNext());
                 }
 
-                cursor2 = db.getAyahTimings(end.sura);
-                Timber.Forest.d("got cursor of data", new Object[0]);
-                if (cursor2 != null && cursor2.moveToFirst()) {
+                lastSurahCursor = db.getAyahTimings(end.sura);
+                Timber.Forest.d("got cursor of data");
+                if (lastSurahCursor != null && lastSurahCursor.moveToFirst()) {
                   do {
-                    int ayah = cursor2.getInt(1);
-                    int time = cursor2.getInt(2);
-                    map2.put(ayah, time);
-                  } while (cursor2.moveToNext());
+                    int ayah = lastSurahCursor.getInt(1);
+                    int time = lastSurahCursor.getInt(2);
+                    lastSurahMap.put(ayah, time);
+                  } while (lastSurahCursor.moveToNext());
                 }
               } catch (SQLException sqlException) {
                 Timber.Forest.e(sqlException);
               } finally {
-                closeCursor(cursor2);
+                closeCursor(lastSurahCursor);
               }
-              mapArray.addAll(Arrays.asList(new SparseIntArray[]{map1, map2}));
+              ArrayList<SparseIntArray> mapArray = new ArrayList<>(Arrays.asList(firstSurahMap, lastSurahMap));
               return mapArray;
             }).subscribeOn(Schedulers.io())
             .observeOn(AndroidSchedulers.mainThread())
             .subscribeWith(new DisposableSingleObserver<ArrayList<SparseIntArray>>() {
               @Override
               public void onSuccess(@io.reactivex.rxjava3.annotations.NonNull ArrayList<SparseIntArray> sparseIntArrayList) {
-                PagerActivity pagerActivity = PagerActivity.this;
                 Intrinsics.checkNotNullExpressionValue(sparseIntArrayList, "mapArray");
 
                 int startAyah = start.ayah;
@@ -1961,7 +1955,6 @@ public class PagerActivity extends AppCompatActivity implements
 
                 if (start.sura == end.sura){
                   sharePathIntent(new File(getSurahSegment(getSurahAudioPath(audioPathInfo,start.sura),startAyahTime,endAyahTime)),BuildConfig.APPLICATION_ID);
-                  dismissProgressDialog();
                 }else {
                   ArrayList<String> paths = new ArrayList<>();
                   String path1  = getSurahAudioPath(audioPathInfo,start.sura);
@@ -1984,10 +1977,9 @@ public class PagerActivity extends AppCompatActivity implements
                   if (!paths.isEmpty()){
                     File sharableAudioFile = getMergedAudioFromSegments(paths);
                     sharePathIntent(sharableAudioFile, BuildConfig.APPLICATION_ID);
-                    dismissProgressDialog();
                   }
                 }
-                
+                dismissProgressDialog();
               }
 
               @Override
