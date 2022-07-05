@@ -1,6 +1,5 @@
 package com.quran.labs.androidquran.ui;
 
-import static android.content.Intent.EXTRA_STREAM;
 import static com.quran.labs.androidquran.database.DatabaseUtils.closeCursor;
 import static com.quran.labs.androidquran.ui.helpers.SlidingPagerAdapter.AUDIO_PAGE;
 import static com.quran.labs.androidquran.ui.helpers.SlidingPagerAdapter.TAG_PAGE;
@@ -19,8 +18,6 @@ import android.content.res.Configuration;
 import android.content.res.Resources;
 import android.database.Cursor;
 import android.database.SQLException;
-import android.media.MediaMetadataRetriever;
-import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.Environment;
@@ -49,7 +46,6 @@ import androidx.appcompat.widget.SearchView;
 import androidx.appcompat.widget.Toolbar;
 import androidx.core.app.ActivityCompat;
 import androidx.core.content.ContextCompat;
-import androidx.core.content.FileProvider;
 import androidx.core.util.Pair;
 import androidx.core.view.ViewCompat;
 import androidx.fragment.app.Fragment;
@@ -121,7 +117,6 @@ import com.quran.labs.androidquran.util.QuranScreenInfo;
 import com.quran.labs.androidquran.util.QuranSettings;
 import com.quran.labs.androidquran.util.QuranUtils;
 import com.quran.labs.androidquran.util.ShareUtil;
-import com.quran.labs.androidquran.util.audioConversionUtils.CheapSoundFile;
 import com.quran.labs.androidquran.view.AudioStatusBar;
 import com.quran.labs.androidquran.view.IconPageIndicator;
 import com.quran.labs.androidquran.view.QuranSpinner;
@@ -136,19 +131,13 @@ import com.quran.reading.common.AudioEventPresenter;
 import com.quran.reading.common.ReadingEventPresenter;
 
 import java.io.File;
-import java.io.FileInputStream;
-import java.io.FileNotFoundException;
-import java.io.FileOutputStream;
-import java.io.IOException;
 import java.lang.ref.WeakReference;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashSet;
 import java.util.List;
-import java.util.Locale;
 import java.util.Set;
-import java.util.UUID;
 import java.util.concurrent.TimeUnit;
 
 import javax.inject.Inject;
@@ -275,7 +264,7 @@ public class PagerActivity extends AppCompatActivity implements
   private Disposable timingDisposable;
   private int            gaplessSura;
   private SparseIntArray gaplessSuraData = new SparseIntArray();
-  private File audioCacheDirectory= new File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MUSIC).getPath() +
+  public static final File audioCacheDirectory= new File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MUSIC).getPath() +
       File.separator +"quran_android_cache");
 
 
@@ -1892,9 +1881,8 @@ public class PagerActivity extends AppCompatActivity implements
       actualEnd = (SuraAyah) pair2.component2();
     }
 
-    //get audio info
     final QariItem qari = audioStatusBar.getAudioInfo();
-    AudioPathInfo audioPathInfo = getLocalAudioPathInfo(qari);
+    AudioPathInfo audioPathInfo = audioUtils.getLocalAudioPathInfo(this,qari);
 
     assert audioPathInfo != null;
     if (audioPathInfo.getGaplessDatabase() != null) {
@@ -1902,7 +1890,7 @@ public class PagerActivity extends AppCompatActivity implements
     }
   }
 
-    private void createAndShareAudio(SuraAyah start, SuraAyah end, AudioPathInfo audioPathInfo) {
+  private void createAndShareAudio(SuraAyah start, SuraAyah end, AudioPathInfo audioPathInfo) {
     showProgressDialog();
     String databasePath = audioPathInfo.getGaplessDatabase();
     compositeDisposable.add(
@@ -1951,17 +1939,17 @@ public class PagerActivity extends AppCompatActivity implements
                 int startAyah = start.ayah;
                 int endAyah = end.ayah;
                 int startAyahTime = startAyah == 1?sparseIntArrayList.get(0).get(0):sparseIntArrayList.get(0).get(startAyah);
-                int endAyahTime = startAyah == 1?sparseIntArrayList.get(1).get(0):sparseIntArrayList.get(1).get(endAyah+1)==0?getSurahDuration(getSurahAudioPath(audioPathInfo,end.sura)):sparseIntArrayList.get(1).get(endAyah+1);
+                int endAyahTime = startAyah == 1?sparseIntArrayList.get(1).get(0):sparseIntArrayList.get(1).get(endAyah+1)==0?audioUtils.getSurahDuration(PagerActivity.this,audioUtils.getSurahAudioPath(audioPathInfo,end.sura)):sparseIntArrayList.get(1).get(endAyah+1);
 
                 if (start.sura == end.sura){
-                  sharePathIntent(new File(getSurahSegment(getSurahAudioPath(audioPathInfo,start.sura),startAyahTime,endAyahTime)),BuildConfig.APPLICATION_ID);
+                 shareUtil.shareAudioFileIntent(PagerActivity.this,new File(audioUtils.getSurahSegment(audioUtils.getSurahAudioPath(audioPathInfo,start.sura),startAyahTime,endAyahTime)));
                 }else {
                   ArrayList<String> paths = new ArrayList<>();
-                  String path1  = getSurahAudioPath(audioPathInfo,start.sura);
-                  int upperCut = getSurahDuration(path1);
-                  String firstSegment = getSurahSegment(path1,startAyahTime,upperCut);
-                  String path2  = getSurahAudioPath(audioPathInfo,end.sura);
-                  String lastSegment = getSurahSegment(path2,0,endAyahTime);
+                  String path1  = audioUtils.getSurahAudioPath(audioPathInfo,start.sura);
+                  int upperCut = audioUtils.getSurahDuration(PagerActivity.this,path1);
+                  String firstSegment = audioUtils.getSurahSegment(path1,startAyahTime,upperCut);
+                  String path2  = audioUtils.getSurahAudioPath(audioPathInfo,end.sura);
+                  String lastSegment = audioUtils.getSurahSegment(path2,0,endAyahTime);
 
                   for (int surahIndex = start.sura; surahIndex<=end.sura; surahIndex++){
                     if (surahIndex == start.sura){
@@ -1969,14 +1957,14 @@ public class PagerActivity extends AppCompatActivity implements
                       continue;
                     }
                     if (surahIndex != end.sura){
-                      paths.add(getSurahAudioPath(audioPathInfo,surahIndex));
+                      paths.add(audioUtils.getSurahAudioPath(audioPathInfo,surahIndex));
                       continue;
                     }
                     paths.add(lastSegment);
                   }
                   if (!paths.isEmpty()){
-                    File sharableAudioFile = getMergedAudioFromSegments(paths);
-                    sharePathIntent(sharableAudioFile, BuildConfig.APPLICATION_ID);
+                    File sharableAudioFile = audioUtils.getMergedAudioFromSegments(paths);
+                    shareUtil.shareAudioFileIntent(PagerActivity.this,sharableAudioFile);
                   }
                 }
                 dismissProgressDialog();
@@ -1990,110 +1978,6 @@ public class PagerActivity extends AppCompatActivity implements
             })
     );
   }
-
-  private AudioPathInfo getLocalAudioPathInfo(QariItem qari){
-    String localPath = audioUtils.getLocalQariUri(this,qari);
-    if (localPath != null){
-      String databasePath = audioUtils.getQariDatabasePathIfGapless(this,qari);
-      String urlFormat = databasePath.isEmpty() ? localPath + File.separator + "%d" + File.separator +
-            "%d" + AudioUtils.AUDIO_EXTENSION:localPath + File.separator + "%03d" + AudioUtils.AUDIO_EXTENSION;
-      return new AudioPathInfo(urlFormat, localPath, databasePath);
-    }
-    return null;
-  }
-
-  private File getMergedAudioFromSegments(ArrayList<String> segments) {
-    String mergedAudioPath = segments.get(0);
-    if (segments.size() > 1){
-      for(int i =1;i< segments.size(); i++){
-        mergedAudioPath = mergeFiles(mergedAudioPath, segments.get(i));
-      }
-    }
-    return new File(mergedAudioPath);
-  }
-
-  private String getSurahSegment(String path, int lowerCut, int upperCut) {
-    String tempAudioName = UUID.randomUUID().toString() + ".mp3";
-    File         destFile = new File(audioCacheDirectory.getPath() + File.separator + tempAudioName);
-    final CheapSoundFile[] mSoundFile = new CheapSoundFile[1];
-        try {
-          mSoundFile[0] = CheapSoundFile.create(path, null);
-          if (lowerCut == 0 && upperCut == 0){
-            return null;
-          }
-          float startTime = (float) lowerCut/1000;
-          float endTime = (float) upperCut/1000;
-          int samplesPerFrame = mSoundFile[0].getSamplesPerFrame();
-          int sampleRate      = mSoundFile[0].getSampleRate();
-          int avg             = sampleRate/samplesPerFrame;
-          int startFrames     = Math.round(startTime * avg);
-          int endFrames       = Math.round(endTime * avg);
-          mSoundFile[0].WriteFile(destFile, startFrames, (endFrames-startFrames));
-        } catch (IOException e) {
-          e.printStackTrace();
-        };
-    return destFile.getPath();
-  }
-
-  private int getSurahDuration(String path) {
-    MediaMetadataRetriever mmr = new MediaMetadataRetriever();
-    mmr.setDataSource(getApplicationContext(),Uri.parse(path));
-    String durationStr = mmr.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION);
-    return Integer.parseInt(durationStr);
-  }
-
-  private String mergeFiles(String path1, String path2) {
-    String tempAudioName = UUID.randomUUID().toString() + ".mp3";
-    File         destFile = new File(audioCacheDirectory.getPath() + File.separator + tempAudioName);
-    try {
-      FileInputStream fileInputStream = new FileInputStream(path1);
-      byte[]           bArr             = new byte[1048576];
-
-      FileOutputStream fileOutputStream = new FileOutputStream(destFile);
-      while (true) {
-        int read = fileInputStream.read(bArr);
-        if (read == -1) {
-          break;
-        }
-        fileOutputStream.write(bArr, 0, read);
-        fileOutputStream.flush();
-      }
-      fileInputStream.close();
-
-
-      FileInputStream fileInputStream2 = new FileInputStream(path2);
-      while (true) {
-        int read2 = fileInputStream2.read(bArr);
-        if (read2 == -1) {
-          break;
-        }
-        fileOutputStream.write(bArr, 0, read2);
-        fileOutputStream.flush();
-      }
-      fileInputStream2.close();
-      fileOutputStream.close();
-      return destFile.getPath();
-    } catch (FileNotFoundException e2) {
-      e2.printStackTrace();
-    } catch (IOException e) {
-      e.printStackTrace();
-    }
-return null;
-  }
-
-  private String getSurahAudioPath(AudioPathInfo audioPathInfo, int surah) {
-    return String.format(Locale.US, audioPathInfo.getLocalDirectory(), surah);
-  }
-
-  private void sharePathIntent(File file, String applicationId) {
-    String authorities = BuildConfig.APPLICATION_ID + ".fileprovider";
-    Uri    uri        = FileProvider.getUriForFile(this, authorities, file);
-    Intent shareIntent = new Intent(Intent.ACTION_SEND);
-    shareIntent.putExtra(EXTRA_STREAM,uri);
-    shareIntent.setType("audio/m4a");
-    shareIntent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
-    startActivity(Intent.createChooser(shareIntent, "Share"));
-    }
 
   private void showProgressDialog() {
     if (progressDialog == null) {
