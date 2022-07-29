@@ -1890,9 +1890,9 @@ public class PagerActivity extends AppCompatActivity implements
   public void shareAyahAudio(SuraAyah start, SuraAyah end) {
     audioCacheFilePaths.clear();
 
-    kotlin.Pair pair2 = getReorderedAyatPair(start, end);
-    selectedStartSuraAyah = (SuraAyah) pair2.component1();
-    selectedEndSuraAyah = (SuraAyah) pair2.component2();
+    kotlin.Pair pair = getReorderedAyatPair(start, end);
+    selectedStartSuraAyah = (SuraAyah) pair.component1();
+    selectedEndSuraAyah = (SuraAyah) pair.component2();
 
     selectedQari = audioStatusBar.getAudioInfo();
     AudioPathInfo audioPathInfo = audioUtils.getLocalAudioPathInfo(selectedQari);
@@ -1969,7 +1969,7 @@ public class PagerActivity extends AppCompatActivity implements
                       audioUtils.getSurahAudioPath(audioPathInfo, start.sura), startAyahTime,
                       endAyahTime);
                   audioCacheFilePaths.add(audioSegmentPath);
-                  shareAudioSegment(renameSharableAudioFile(audioSegmentPath));
+                  shareAudioSegment(getRenamedSharableAudioFile(audioSegmentPath));
                 } else {
                   ArrayList<String> segmentPaths = new ArrayList<>();
                   int endOfSurah = -1;
@@ -2000,7 +2000,7 @@ public class PagerActivity extends AppCompatActivity implements
                     audioCacheFilePaths.addAll(segmentPaths);
                     String sharableAudioFilePath = audioUtils.getMergedAudioFromSegments(
                         segmentPaths);
-                    shareAudioSegment(renameSharableAudioFile(sharableAudioFilePath));
+                    shareAudioSegment(getRenamedSharableAudioFile(sharableAudioFilePath));
                   }
                 }
                 dismissProgressDialog();
@@ -2057,7 +2057,7 @@ public class PagerActivity extends AppCompatActivity implements
     return sparseIntArray;
   }
 
-  private String renameSharableAudioFile(String audioSegmentPath) {
+  private String getRenamedSharableAudioFile(String audioSegmentPath) {
     String newAudioFileName = selectedQari.getPath() + "_" + selectedStartSuraAyah.sura + "-" + selectedStartSuraAyah.ayah + "_" + selectedEndSuraAyah.sura + "-" + selectedEndSuraAyah.ayah;
     String newAudioFilePath = audioCacheDirectory + File.separator + newAudioFileName + ".mp3";
     new File(audioSegmentPath).renameTo(new File(newAudioFilePath));
