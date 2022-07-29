@@ -1985,6 +1985,7 @@ public class PagerActivity extends AppCompatActivity implements
 
                     if (isTheFirstSurah) {
                       segmentPaths.add(startSegmentPath);
+                      audioCacheFilePaths.add(startSegmentPath);
                       continue;
                     }
                     if (isMiddleSurah) {
@@ -1992,12 +1993,13 @@ public class PagerActivity extends AppCompatActivity implements
                       continue;
                     }
                     segmentPaths.add(lastSegmentPath);
+                    audioCacheFilePaths.add(lastSegmentPath);
+
                   }
 
                   boolean audioSegmentsWereCreated = !segmentPaths.isEmpty();
 
                   if (audioSegmentsWereCreated) {
-                    audioCacheFilePaths.addAll(segmentPaths);
                     String sharableAudioFilePath = audioUtils.getMergedAudioFromSegments(
                         segmentPaths);
                     shareAudioSegment(getRenamedSharableAudioFile(sharableAudioFilePath));

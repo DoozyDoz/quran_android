@@ -5,8 +5,6 @@ import android.content.Intent
 import android.media.MediaMetadataRetriever
 import android.net.Uri
 import androidx.annotation.VisibleForTesting
-import androidx.core.content.ContextCompat.startActivity
-import androidx.core.content.FileProvider
 import com.quran.data.core.QuranInfo
 import com.quran.data.model.SuraAyah
 import com.quran.labs.androidquran.common.audio.model.AudioConfiguration
@@ -16,17 +14,21 @@ import com.quran.labs.androidquran.dao.audio.AudioPathInfo
 import com.quran.labs.androidquran.service.AudioService
 import com.quran.labs.androidquran.ui.PagerActivity
 import com.quran.labs.androidquran.util.audioConversionUtils.CheapSoundFile
+import okio.*
 import timber.log.Timber
 import java.io.*
+import java.io.FileNotFoundException
+import java.io.IOException
 import java.util.*
 import javax.inject.Inject
 import kotlin.math.roundToInt
 
+
 class AudioUtils @Inject constructor(
-  private val quranInfo: QuranInfo,
-  private val quranFileUtils: QuranFileUtils,
-  private val audioConfiguration: AudioConfiguration,
-  private val qariUtil: QariUtil
+    private val quranInfo: QuranInfo,
+    private val quranFileUtils: QuranFileUtils,
+    private val audioConfiguration: AudioConfiguration,
+    private val qariUtil: QariUtil
 ) {
 
   private val totalPages = quranInfo.numberOfPages
@@ -52,16 +54,16 @@ class AudioUtils @Inject constructor(
    */
   fun getQariList(context: Context): List<QariItem> {
     return qariUtil.getQariList(context, audioConfiguration)
-      .filter {
-        it.isGapless || (it.hasGaplessAlternative && !haveAnyFiles(it.path))
-      }
-      .sortedWith { lhs, rhs ->
-        if (lhs.isGapless != rhs.isGapless) {
-          if (lhs.isGapless) -1 else 1
-        } else {
-          lhs.name.compareTo(rhs.name)
+        .filter {
+          it.isGapless || (it.hasGaplessAlternative && !haveAnyFiles(it.path))
         }
-      }
+        .sortedWith { lhs, rhs ->
+          if (lhs.isGapless != rhs.isGapless) {
+            if (lhs.isGapless) -1 else 1
+          } else {
+            lhs.name.compareTo(rhs.name)
+          }
+        }
   }
 
   private fun haveAnyFiles(path: String): Boolean {
@@ -105,22 +107,22 @@ class AudioUtils @Inject constructor(
   }
 
   fun getLastAyahToPlay(
-    startAyah: SuraAyah,
-    currentPage: Int,
-    mode: Int,
-    isDualPageVisible: Boolean
+      startAyah: SuraAyah,
+      currentPage: Int,
+      mode: Int,
+      isDualPageVisible: Boolean
   ): SuraAyah? {
     val page =
-      if (isDualPageVisible &&
-        mode == LookAheadAmount.PAGE &&
-        currentPage % 2 == 1
-      ) {
-        // if we download page by page and we are currently in tablet mode
-        // and playing from the right page, get the left page as well.
-        currentPage + 1
-      } else {
-        currentPage
-      }
+        if (isDualPageVisible &&
+            mode == LookAheadAmount.PAGE &&
+            currentPage % 2 == 1
+        ) {
+          // if we download page by page and we are currently in tablet mode
+          // and playing from the right page, get the left page as well.
+          currentPage + 1
+        } else {
+          currentPage
+        }
 
     var pageLastSura = 114
     var pageLastAyah = 6
@@ -174,10 +176,10 @@ class AudioUtils @Inject constructor(
   }
 
   fun shouldDownloadBasmallah(
-    baseDirectory: String,
-    start: SuraAyah,
-    end: SuraAyah,
-    isGapless: Boolean
+      baseDirectory: String,
+      start: SuraAyah,
+      end: SuraAyah,
+      isGapless: Boolean
   ): Boolean {
     if (isGapless) {
       return false
@@ -219,11 +221,11 @@ class AudioUtils @Inject constructor(
   }
 
   fun haveAllFiles(
-    baseUrl: String,
-    path: String,
-    start: SuraAyah,
-    end: SuraAyah,
-    isGapless: Boolean
+      baseUrl: String,
+      path: String,
+      start: SuraAyah,
+      end: SuraAyah,
+      isGapless: Boolean
   ): Boolean {
     if (path.isEmpty()) {
       return false
@@ -243,7 +245,7 @@ class AudioUtils @Inject constructor(
 
     if (endSura < startSura || endSura == startSura && endAyah < startAyah) {
       throw IllegalStateException(
-        "End isn't larger than the start: $startSura:$startAyah to $endSura:$endAyah"
+          "End isn't larger than the start: $startSura:$startAyah to $endSura:$endAyah"
       )
     }
 
@@ -320,30 +322,10 @@ class AudioUtils @Inject constructor(
     val tempAudioName = UUID.randomUUID().toString() + ".mp3"
     val destFile = File(PagerActivity.audioCacheDirectory.path + File.separator + tempAudioName)
     try {
-      val fileInputStream = FileInputStream(path1)
-      val bArr = ByteArray(1048576)
-      val fileOutputStream = FileOutputStream(destFile)
-      while (true) {
-        val read = fileInputStream.read(bArr)
-        if (read == -1) {
-          break
-        }
-        fileOutputStream.write(bArr, 0, read)
-        fileOutputStream.flush()
-      }
-      fileInputStream.close()
-      val fileInputStream2 = FileInputStream(path2)
-      while (true) {
-        val read2 = fileInputStream2.read(bArr)
-        if (read2 == -1) {
-          break
-        }
-        fileOutputStream.write(bArr, 0, read2)
-        fileOutputStream.flush()
-      }
-      fileInputStream2.close()
-      fileOutputStream.close()
-      return destFile.path
+      val bufferedSink: BufferedSink = destFile.sink().buffer()
+      bufferedSink.writeAll(File(path1).source())
+      bufferedSink.writeAll(File(path2).source())
+      bufferedSink.close()
     } catch (e2: FileNotFoundException) {
       e2.printStackTrace()
     } catch (e: IOException) {
@@ -375,7 +357,7 @@ class AudioUtils @Inject constructor(
     return destFile.absolutePath
   }
 
-  fun getSurahDuration(context: Context,path: String): Int {
+  fun getSurahDuration(context: Context, path: String): Int {
     val mmr = MediaMetadataRetriever()
     mmr.setDataSource(context, Uri.parse(path))
     val durationStr = mmr.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)
