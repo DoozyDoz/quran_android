@@ -326,6 +326,7 @@ class AudioUtils @Inject constructor(
       bufferedSink.writeAll(File(path1).source())
       bufferedSink.writeAll(File(path2).source())
       bufferedSink.close()
+      return destFile.path
     } catch (e2: FileNotFoundException) {
       e2.printStackTrace()
     } catch (e: IOException) {
