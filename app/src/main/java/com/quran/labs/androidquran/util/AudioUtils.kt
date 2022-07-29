@@ -14,13 +14,18 @@ import com.quran.labs.androidquran.dao.audio.AudioPathInfo
 import com.quran.labs.androidquran.service.AudioService
 import com.quran.labs.androidquran.ui.PagerActivity
 import com.quran.labs.androidquran.util.audioConversionUtils.CheapSoundFile
-import okio.*
+import okio.BufferedSink
+import okio.buffer
+import okio.sink
+import okio.source
 import timber.log.Timber
-import java.io.*
+import java.io.File
 import java.io.FileNotFoundException
 import java.io.IOException
-import java.util.*
+import java.util.Locale
+import java.util.UUID
 import javax.inject.Inject
+import kotlin.collections.ArrayList
 import kotlin.math.roundToInt
 
 
