@@ -1,10 +1,5 @@
 package com.quran.labs.androidquran.ui;
 
-import static com.quran.labs.androidquran.database.DatabaseUtils.closeCursor;
-import static com.quran.labs.androidquran.ui.helpers.SlidingPagerAdapter.AUDIO_PAGE;
-import static com.quran.labs.androidquran.ui.helpers.SlidingPagerAdapter.TAG_PAGE;
-import static com.quran.labs.androidquran.ui.helpers.SlidingPagerAdapter.TRANSLATION_PAGE;
-
 import android.app.ProgressDialog;
 import android.app.SearchManager;
 import android.content.BroadcastReceiver;
@@ -16,8 +11,6 @@ import android.content.SharedPreferences;
 import android.content.pm.ActivityInfo;
 import android.content.res.Configuration;
 import android.content.res.Resources;
-import android.database.Cursor;
-import android.database.SQLException;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.Environment;
@@ -26,7 +19,6 @@ import android.os.Message;
 import android.preference.PreferenceManager;
 import android.text.TextUtils;
 import android.util.SparseBooleanArray;
-import android.util.SparseIntArray;
 import android.view.HapticFeedbackConstants;
 import android.view.KeyEvent;
 import android.view.Menu;
@@ -36,24 +28,6 @@ import android.view.View;
 import android.view.ViewGroup;
 import android.widget.ArrayAdapter;
 import android.widget.Toast;
-
-import androidx.annotation.NonNull;
-import androidx.annotation.Nullable;
-import androidx.appcompat.app.ActionBar;
-import androidx.appcompat.app.AlertDialog;
-import androidx.appcompat.app.AppCompatActivity;
-import androidx.appcompat.widget.SearchView;
-import androidx.appcompat.widget.Toolbar;
-import androidx.core.app.ActivityCompat;
-import androidx.core.content.ContextCompat;
-import androidx.core.util.Pair;
-import androidx.core.view.ViewCompat;
-import androidx.fragment.app.Fragment;
-import androidx.fragment.app.FragmentManager;
-import androidx.localbroadcastmanager.content.LocalBroadcastManager;
-import androidx.viewpager.widget.NonRestoringViewPager;
-import androidx.viewpager.widget.ViewPager;
-import androidx.viewpager.widget.ViewPager.OnPageChangeListener;
 
 import com.quran.data.core.QuranInfo;
 import com.quran.data.model.SuraAyah;
@@ -80,7 +54,6 @@ import com.quran.labs.androidquran.dao.audio.AudioRequest;
 import com.quran.labs.androidquran.data.Constants;
 import com.quran.labs.androidquran.data.QuranDataProvider;
 import com.quran.labs.androidquran.data.QuranDisplayData;
-import com.quran.labs.androidquran.database.SuraTimingDatabaseHandler;
 import com.quran.labs.androidquran.database.TranslationsDBAdapter;
 import com.quran.labs.androidquran.di.component.activity.PagerActivityComponent;
 import com.quran.labs.androidquran.di.module.activity.PagerActivityModule;
@@ -131,12 +104,9 @@ import com.quran.page.common.toolbar.di.AyahToolBarInjector;
 import com.quran.reading.common.AudioEventPresenter;
 import com.quran.reading.common.ReadingEventPresenter;
 
-import org.jetbrains.annotations.NotNull;
-
 import java.io.File;
 import java.lang.ref.WeakReference;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashSet;
 import java.util.List;
@@ -145,6 +115,23 @@ import java.util.concurrent.TimeUnit;
 
 import javax.inject.Inject;
 
+import androidx.annotation.NonNull;
+import androidx.annotation.Nullable;
+import androidx.appcompat.app.ActionBar;
+import androidx.appcompat.app.AlertDialog;
+import androidx.appcompat.app.AppCompatActivity;
+import androidx.appcompat.widget.SearchView;
+import androidx.appcompat.widget.Toolbar;
+import androidx.core.app.ActivityCompat;
+import androidx.core.content.ContextCompat;
+import androidx.core.util.Pair;
+import androidx.core.view.ViewCompat;
+import androidx.fragment.app.Fragment;
+import androidx.fragment.app.FragmentManager;
+import androidx.localbroadcastmanager.content.LocalBroadcastManager;
+import androidx.viewpager.widget.NonRestoringViewPager;
+import androidx.viewpager.widget.ViewPager;
+import androidx.viewpager.widget.ViewPager.OnPageChangeListener;
 import io.reactivex.rxjava3.android.schedulers.AndroidSchedulers;
 import io.reactivex.rxjava3.core.Completable;
 import io.reactivex.rxjava3.core.Observable;
@@ -154,11 +141,11 @@ import io.reactivex.rxjava3.observers.DisposableObserver;
 import io.reactivex.rxjava3.observers.DisposableSingleObserver;
 import io.reactivex.rxjava3.schedulers.Schedulers;
 import kotlin.TuplesKt;
-import kotlin.coroutines.Continuation;
-import kotlin.coroutines.CoroutineContext;
-import kotlin.coroutines.EmptyCoroutineContext;
-import kotlin.jvm.internal.Intrinsics;
 import timber.log.Timber;
+
+import static com.quran.labs.androidquran.ui.helpers.SlidingPagerAdapter.AUDIO_PAGE;
+import static com.quran.labs.androidquran.ui.helpers.SlidingPagerAdapter.TAG_PAGE;
+import static com.quran.labs.androidquran.ui.helpers.SlidingPagerAdapter.TRANSLATION_PAGE;
 
 /**
  * Activity that displays the Quran (in Arabic or translation mode).
@@ -1910,7 +1897,9 @@ public class PagerActivity extends AppCompatActivity implements
     if (gaplessDatabaseExists) {
       if (audioFilesExist(audioPathInfo)) {
         AudioShareUtils audioShareUtils = new AudioShareUtils();
-        String path = audioShareUtils.createSharableAudioFile(this,selectedStartSuraAyah, selectedEndSuraAyah,selectedQari, new com.quran.labs.androidquran.feature.audio_sharing.model.AudioPathInfo(audioPathInfo.getUrlFormat(),audioPathInfo.getLocalDirectory(),audioPathInfo.getGaplessDatabase()));
+        String path = audioShareUtils.createSharableAudioFile(this, selectedStartSuraAyah,
+            selectedEndSuraAyah, selectedQari, audioPathInfo.getUrlFormat(),
+            audioPathInfo.getGaplessDatabase());
         shareAudioSegment(path);
       } else {
         requestDownload(audioPathInfo);

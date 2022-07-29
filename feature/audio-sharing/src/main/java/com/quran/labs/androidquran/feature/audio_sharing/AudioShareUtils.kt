@@ -9,7 +9,6 @@ import android.os.Environment
 import android.util.SparseIntArray
 import com.quran.data.model.SuraAyah
 import com.quran.labs.androidquran.common.audio.model.QariItem
-import com.quran.labs.androidquran.feature.audio_sharing.model.AudioPathInfo
 import com.quran.labs.androidquran.feature.audio_sharing.utils.CheapSoundFile
 import com.quran.labs.androidquran.feature.audio_sharing.utils.SuraTimingDatabaseHandler
 import com.quran.labs.androidquran.feature.audio_sharing.utils.SuraTimingDatabaseHandler.DatabaseUtils.closeCursor
@@ -24,7 +23,6 @@ import java.io.FileNotFoundException
 import java.io.IOException
 import java.util.Locale
 import java.util.UUID
-import java.util.concurrent.CompletableFuture
 import kotlin.math.roundToInt
 
 class AudioShareUtils {
@@ -50,7 +48,7 @@ class AudioShareUtils {
   }
 
 
-  fun createSharableAudioFile(context: Context, start: SuraAyah, end: SuraAyah, qari: QariItem, audioPathInfo: AudioPathInfo): String? {
+  fun createSharableAudioFile(context: Context, start: SuraAyah, end: SuraAyah, qari: QariItem, urlFormat: String, gaplessDatabase: String): String? {
     selectedStartSuraAyah = getReorderedAyahPair(start, end).start
     selectedEndSuraAyah = getReorderedAyahPair(start, end).end
     selectedQari = qari
@@ -60,7 +58,7 @@ class AudioShareUtils {
     return runBlocking {
       GlobalScope.launch(Dispatchers.IO) {
         val mapArray = async {
-          getTimingData(start, end, audioPathInfo)
+          getTimingData(start, end, gaplessDatabase)
         }.await()
 
         val startAyah = start.ayah
@@ -80,7 +78,7 @@ class AudioShareUtils {
 
         val endAyahTime = if (isLastAyahInSurah) {
           getSurahDuration(context,
-              getSurahAudioPath(audioPathInfo, end.sura)!!)
+              getSurahAudioPath(urlFormat, end.sura)!!)
         } else {
           startTimeOfAyahAfterEndAyah
         }
@@ -89,7 +87,7 @@ class AudioShareUtils {
 
         if (startAndEndAyahAreInSameSurah) {
           val audioSegmentPath: String = getSurahSegment(
-              getSurahAudioPath(audioPathInfo, start.sura)!!, startAyahTime,
+              getSurahAudioPath(urlFormat, start.sura)!!, startAyahTime,
               endAyahTime)!!
           audioCacheFilePaths.add(audioSegmentPath)
           sharablePath = getRenamedSharableAudioFile(audioSegmentPath)
@@ -97,9 +95,9 @@ class AudioShareUtils {
           val segmentPaths = java.util.ArrayList<String>()
           val endOfSurah = -1
           val startOfSurah = 0
-          val startSegmentPath: String = getSurahSegmentPath(context, audioPathInfo, start.sura,
+          val startSegmentPath: String = getSurahSegmentPath(context, urlFormat, start.sura,
               startAyahTime, endOfSurah)
-          val lastSegmentPath: String = getSurahSegmentPath(context, audioPathInfo, end.sura,
+          val lastSegmentPath: String = getSurahSegmentPath(context, urlFormat, end.sura,
               startOfSurah, endAyahTime)
 
           for (surahIndex in start.sura..end.sura) {
@@ -111,7 +109,7 @@ class AudioShareUtils {
               continue
             }
             if (isMiddleSurah) {
-              segmentPaths.add(getSurahAudioPath(audioPathInfo, surahIndex)!!)
+              segmentPaths.add(getSurahAudioPath(urlFormat, surahIndex)!!)
               continue
             }
             segmentPaths.add(lastSegmentPath)
@@ -134,10 +132,10 @@ class AudioShareUtils {
 
   }
 
-  private fun getSurahSegmentPath(context: Context, audioPathInfo: AudioPathInfo, surah: Int,
+  private fun getSurahSegmentPath(context: Context, urlFormat: String, surah: Int,
                                   startAyahTime: Int, endAyahTime: Int): String {
     var upperBoundTime = endAyahTime
-    val audioFilePath: String = getSurahAudioPath(audioPathInfo, surah)!!
+    val audioFilePath: String = getSurahAudioPath(urlFormat, surah)!!
     val isFirstSegment = endAyahTime < 0
     if (isFirstSegment) {
       upperBoundTime = getSurahDuration(context, audioFilePath)
@@ -164,12 +162,12 @@ class AudioShareUtils {
     return durationStr!!.toInt()
   }
 
-  private fun getSurahAudioPath(audioPathInfo: AudioPathInfo, surah: Int): String? {
-    return String.format(Locale.US, audioPathInfo.urlFormat, surah)
+  private fun getSurahAudioPath(urlFormat: String, surah: Int): String? {
+    return String.format(Locale.US, urlFormat, surah)
   }
 
-  private fun getTimingData(start: SuraAyah, end: SuraAyah, audioPathInfo: AudioPathInfo): ArrayList<SparseIntArray> {
-    val databasePath = audioPathInfo.gaplessDatabase!!
+  private fun getTimingData(start: SuraAyah, end: SuraAyah, gaplessDatabase: String): ArrayList<SparseIntArray> {
+    val databasePath = gaplessDatabase!!
 
     val db: SuraTimingDatabaseHandler = SuraTimingDatabaseHandler.getDatabaseHandler(
         databasePath)
