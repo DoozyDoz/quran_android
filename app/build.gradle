@@ -129,9 +129,11 @@ dependencies {
   implementation project(path: ':common:upgrade')
 
   implementation project(path: ':feature:audio')
+  implementation project(path: ':feature:audio-sharing')
 
   implementation "org.jetbrains.kotlinx:kotlinx-coroutines-core:${coroutinesVersion}"
   implementation "org.jetbrains.kotlinx:kotlinx-coroutines-android:${coroutinesVersion}"
+  implementation "org.jetbrains.kotlinx:kotlinx-coroutines-jdk8:1.0.1"
 
   implementation "com.squareup.retrofit2:retrofit:${retrofitVersion}"
   implementation "com.squareup.retrofit2:converter-moshi:${retrofitVersion}"
