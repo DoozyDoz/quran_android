@@ -6,12 +6,14 @@ import com.quran.labs.androidquran.common.LocalTranslation
 import com.quran.labs.androidquran.common.QuranAyahInfo
 import com.quran.labs.androidquran.database.TranslationsDBAdapter
 import com.quran.labs.androidquran.model.translation.TranslationModel
+import com.quran.labs.androidquran.ui.translation.ScrollPositionManager
 import com.quran.labs.androidquran.util.QuranSettings
 import com.quran.labs.androidquran.util.TranslationUtil
-import io.reactivex.rxjava3.core.Observable
 import io.reactivex.rxjava3.android.schedulers.AndroidSchedulers
+import io.reactivex.rxjava3.core.Observable
 import io.reactivex.rxjava3.observers.DisposableObserver
 import javax.inject.Inject
+
 
 @QuranPageScope
 internal class TranslationPresenter @Inject internal constructor(translationModel: TranslationModel,
@@ -19,11 +21,13 @@ internal class TranslationPresenter @Inject internal constructor(translationMode
                      translationsAdapter: TranslationsDBAdapter,
                      translationUtil: TranslationUtil,
                      private val quranInfo: QuranInfo,
-                     private val pages: IntArray) :
+                     private val pages: IntArray,
+                     private val scrollPositionManager: ScrollPositionManager) :
     BaseTranslationPresenter<TranslationPresenter.TranslationScreen>(
         translationModel, translationsAdapter, translationUtil, quranInfo) {
 
   fun refresh() {
+    val position = scrollPositionManager.scrollPosition
     disposable?.dispose()
 
     disposable = Observable.fromArray(*pages.toTypedArray())
@@ -40,6 +44,7 @@ internal class TranslationPresenter @Inject internal constructor(translationMode
               screen.setVerses(
                   getPage(result.ayahInformation), result.translations,
                   result.ayahInformation)
+              scrollPositionManager.scrollPosition = position
               screen.updateScrollPosition()
             }
           }

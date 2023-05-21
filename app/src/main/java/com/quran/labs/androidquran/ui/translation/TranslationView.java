@@ -34,7 +34,7 @@ import java.util.Collections;
 import java.util.List;
 
 public class TranslationView extends FrameLayout implements View.OnClickListener,
-    TranslationAdapter.OnVerseSelectedListener, TranslationAdapter.OnJumpToAyahListener {
+    TranslationAdapter.OnVerseSelectedListener, TranslationAdapter.OnJumpToAyahListener, ScrollPositionManager  {
   private final TranslationAdapter translationAdapter;
 
   private SuraAyah selectedAyah;
@@ -341,6 +341,11 @@ public class TranslationView extends FrameLayout implements View.OnClickListener
 
   public int findFirstCompletelyVisibleItemPosition() {
     return layoutManager.findFirstCompletelyVisibleItemPosition();
+  }
+
+  @Override
+  public int getScrollPosition() {
+    return layoutManager.findFirstVisibleItemPosition();
   }
 
   public void setScrollPosition(int position) {
